@@ -1,53 +1,67 @@
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
-  name: documents.kube.rs
+  name: databaseservers.db-operator.widemeadows.de
 spec:
-  group: kube.rs
+  group: db-operator.widemeadows.de
   names:
     categories: []
-    kind: Document
-    plural: documents
+    kind: DatabaseServer
+    plural: databaseservers
     shortNames:
     - doc
-    singular: document
+    singular: databaseserver
   scope: Namespaced
   versions:
   - additionalPrinterColumns: []
     name: v1
     schema:
       openAPIV3Schema:
-        description: Auto-generated derived type for DocumentSpec via `CustomResource`
+        description: Auto-generated derived type for DatabaseServerSpec via `CustomResource`
         properties:
           spec:
             description: |-
-              Generate the Kubernetes wrapper struct `Document` from our Spec and Status struct
+              Generate the Kubernetes wrapper struct `DatabaseServer` from our Spec and Status struct
 
               This provides a hook for generating the CRD yaml (in crdgen.rs)
             properties:
-              content:
+              dbname:
+                description: The database to connect to for the administrative user; defaults to `postgres`.
+                nullable: true
                 type: string
-              hide:
+              enable:
                 type: boolean
-              title:
+              host:
+                description: The host to connect to.
+                type: string
+              password:
+                description: The password of the administrative user.
+                type: string
+              user:
+                description: The user name of the administrative user.
                 type: string
             required:
-            - content
-            - hide
-            - title
+            - enable
+            - host
+            - password
+            - user
             type: object
           status:
-            description: The status object of `Document`
+            description: The status object of `DatabaseServer`
             nullable: true
             properties:
-              hidden:
+              connected:
+                description: Whether a connection attempt was successful.
+                type: boolean
+              enabled:
                 type: boolean
             required:
-            - hidden
+            - connected
+            - enabled
             type: object
         required:
         - spec
-        title: Document
+        title: DatabaseServer
         type: object
     served: true
     storage: true

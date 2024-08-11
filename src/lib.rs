@@ -14,7 +14,7 @@ pub enum Error {
     FinalizerError(#[source] Box<kube::runtime::finalizer::Error<Error>>),
 
     #[error("IllegalDocument")]
-    IllegalDocument,
+    IllegalDatabaseServer,
 }
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 

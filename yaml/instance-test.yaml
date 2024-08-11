@@ -1,0 +1,9 @@
+apiVersion: db-operator.widemeadows.de/v1
+kind: DatabaseServer
+metadata:
+  name: test
+spec:
+  host: postgres
+  user: myuser
+  password: mypassword
+  enable: true

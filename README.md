@@ -24,9 +24,9 @@ cargo run --bin crdgen | kubectl apply -f -
 Install the controller via `helm` by setting your preferred settings. For defaults:
 
 ```sh
-helm template charts/doc-controller | kubectl apply -f -
-kubectl wait --for=condition=available deploy/doc-controller --timeout=30s
-kubectl port-forward service/doc-controller 8080:80
+helm template charts/db-controller | kubectl apply -f -
+kubectl wait --for=condition=available deploy/db-controller --timeout=30s
+kubectl port-forward service/db-controller 8080:80
 ```
 
 ### OpenTelemetry
@@ -34,7 +34,7 @@ kubectl port-forward service/doc-controller 8080:80
 Build and run with `telemetry` feature, or configure it via `helm`:
 
 ```sh
-helm template charts/doc-controller --set tracing.enabled=true | kubectl apply -f -
+helm template charts/db-controller --set tracing.enabled=true | kubectl apply -f -
 ```
 
 This requires an OpenTelemetry collector in your
@@ -51,7 +51,7 @@ depending on whether the tag includes `otel`.
 Metrics is available on `/metrics` and a `ServiceMonitor` is configurable from the chart:
 
 ```sh
-helm template charts/doc-controller --set serviceMonitor.enabled=true | kubectl apply -f -
+helm template charts/db-controller --set serviceMonitor.enabled=true | kubectl apply -f -
 ```
 
 ## Running
@@ -70,7 +70,7 @@ OPENTELEMETRY_ENDPOINT_URL=https://0.0.0.0:55680 RUST_LOG=info,kube=trace,contro
 
 ### In-cluster
 
-For prebuilt, edit the [chart values](./charts/doc-controller/values.yaml) or [snapshotted yaml](./yaml/deployment.yaml)
+For prebuilt, edit the [chart values](./charts/db-controller/values.yaml) or [snapshotted yaml](./yaml/deployment.yaml)
 and apply as you see fit (like above).
 
 To develop by building and deploying the image quickly, we recommend using [tilt](https://tilt.dev/), via `tilt up`
@@ -98,25 +98,25 @@ The sample web server exposes some example metrics and debug information you can
 ```sh
 $ kubectl apply -f yaml/instance-lorem.yaml
 $ curl 0.0.0.0:8080/metrics
-# HELP doc_controller_reconcile_duration_seconds The duration of reconcile to complete in seconds
-# TYPE doc_controller_reconcile_duration_seconds histogram
-doc_controller_reconcile_duration_seconds_bucket{le="0.01"} 1
-doc_controller_reconcile_duration_seconds_bucket{le="0.1"} 1
-doc_controller_reconcile_duration_seconds_bucket{le="0.25"} 1
-doc_controller_reconcile_duration_seconds_bucket{le="0.5"} 1
-doc_controller_reconcile_duration_seconds_bucket{le="1"} 1
-doc_controller_reconcile_duration_seconds_bucket{le="5"} 1
-doc_controller_reconcile_duration_seconds_bucket{le="15"} 1
-doc_controller_reconcile_duration_seconds_bucket{le="60"} 1
-doc_controller_reconcile_duration_seconds_bucket{le="+Inf"} 1
-doc_controller_reconcile_duration_seconds_sum 0.013
-doc_controller_reconcile_duration_seconds_count 1
-# HELP doc_controller_reconciliation_errors_total reconciliation errors
-# TYPE doc_controller_reconciliation_errors_total counter
-doc_controller_reconciliation_errors_total 0
-# HELP doc_controller_reconciliations_total reconciliations
-# TYPE doc_controller_reconciliations_total counter
-doc_controller_reconciliations_total 1
+# HELP db_controller_reconcile_duration_seconds The duration of reconcile to complete in seconds
+# TYPE db_controller_reconcile_duration_seconds histogram
+db_controller_reconcile_duration_seconds_bucket{le="0.01"} 1
+db_controller_reconcile_duration_seconds_bucket{le="0.1"} 1
+db_controller_reconcile_duration_seconds_bucket{le="0.25"} 1
+db_controller_reconcile_duration_seconds_bucket{le="0.5"} 1
+db_controller_reconcile_duration_seconds_bucket{le="1"} 1
+db_controller_reconcile_duration_seconds_bucket{le="5"} 1
+db_controller_reconcile_duration_seconds_bucket{le="15"} 1
+db_controller_reconcile_duration_seconds_bucket{le="60"} 1
+db_controller_reconcile_duration_seconds_bucket{le="+Inf"} 1
+db_controller_reconcile_duration_seconds_sum 0.013
+db_controller_reconcile_duration_seconds_count 1
+# HELP db_controller_reconciliation_errors_total reconciliation errors
+# TYPE db_controller_reconciliation_errors_total counter
+db_controller_reconciliation_errors_total 0
+# HELP db_controller_reconciliations_total reconciliations
+# TYPE db_controller_reconciliations_total counter
+db_controller_reconciliations_total 1
 $ curl 0.0.0.0:8080/
 {"last_event":"2019-07-17T22:31:37.591320068Z"}
 ```

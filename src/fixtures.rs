@@ -1,29 +1,32 @@
 //! Helper methods only available for tests
-use crate::{Context, Document, DocumentSpec, DocumentStatus, Metrics, Result, DOCUMENT_FINALIZER};
+use crate::{
+    Context, DatabaseServer, DatabaseServerSpec, DatabaseServerStatus, Metrics, Result,
+    DATABASE_SERVER_FINALIZER,
+};
 use assert_json_diff::assert_json_include;
 use http::{Request, Response};
 use kube::{client::Body, Client, Resource, ResourceExt};
 use prometheus::Registry;
 use std::sync::Arc;
 
-impl Document {
+impl DatabaseServer {
     /// A document that will cause the reconciler to fail
     pub fn illegal() -> Self {
-        let mut d = Document::new("illegal", DocumentSpec::default());
+        let mut d = DatabaseServer::new("illegal", DatabaseServerSpec::default());
         d.meta_mut().namespace = Some("default".into());
         d
     }
 
     /// A normal test document
     pub fn test() -> Self {
-        let mut d = Document::new("test", DocumentSpec::default());
+        let mut d = DatabaseServer::new("test", DatabaseServerSpec::default());
         d.meta_mut().namespace = Some("default".into());
         d
     }
 
     /// Modify document to be set to hide
     pub fn needs_hide(mut self) -> Self {
-        self.spec.hide = true;
+        self.spec.enable = true;
         self
     }
 
@@ -38,12 +41,12 @@ impl Document {
 
     /// Modify a document to have the expected finalizer
     pub fn finalized(mut self) -> Self {
-        self.finalizers_mut().push(DOCUMENT_FINALIZER.to_string());
+        self.finalizers_mut().push(DATABASE_SERVER_FINALIZER.to_string());
         self
     }
 
     /// Modify a document to have an expected status
-    pub fn with_status(mut self, status: DocumentStatus) -> Self {
+    pub fn with_status(mut self, status: DatabaseServerStatus) -> Self {
         self.status = Some(status);
         self
     }
@@ -56,15 +59,15 @@ pub struct ApiServerVerifier(ApiServerHandle);
 /// Scenarios we test for in ApiServerVerifier
 pub enum Scenario {
     /// objects without finalizers will get a finalizer applied (and not call the apply loop)
-    FinalizerCreation(Document),
+    FinalizerCreation(DatabaseServer),
     /// objects that do not fail and do not cause publishes will only patch
-    StatusPatch(Document),
+    StatusPatch(DatabaseServer),
     /// finalized objects with hide set causes both an event and then a hide patch
-    EventPublishThenStatusPatch(String, Document),
+    EventPublishThenStatusPatch(String, DatabaseServer),
     /// finalized objects "with errors" (i.e. the "illegal" object) will short circuit the apply loop
     RadioSilence,
     /// objects with a deletion timestamp will run the cleanup loop sending event and removing the finalizer
-    Cleanup(String, Document),
+    Cleanup(String, DatabaseServer),
 }
 
 pub async fn timeout_after_1s(handle: tokio::task::JoinHandle<()>) {
@@ -113,7 +116,7 @@ impl ApiServerVerifier {
 
     // chainable scenario handlers
 
-    async fn handle_finalizer_creation(mut self, doc: Document) -> Result<Self> {
+    async fn handle_finalizer_creation(mut self, doc: DatabaseServer) -> Result<Self> {
         let (request, send) = self.0.next_request().await.expect("service not called");
         // We expect a json patch to the specified document adding our finalizer
         assert_eq!(request.method(), http::Method::PATCH);
@@ -126,7 +129,7 @@ impl ApiServerVerifier {
         );
         let expected_patch = serde_json::json!([
             { "op": "test", "path": "/metadata/finalizers", "value": null },
-            { "op": "add", "path": "/metadata/finalizers", "value": vec![DOCUMENT_FINALIZER] }
+            { "op": "add", "path": "/metadata/finalizers", "value": vec![DATABASE_SERVER_FINALIZER] }
         ]);
         let req_body = request.into_body().collect_bytes().await.unwrap();
         let runtime_patch: serde_json::Value =
@@ -138,7 +141,7 @@ impl ApiServerVerifier {
         Ok(self)
     }
 
-    async fn handle_finalizer_removal(mut self, doc: Document) -> Result<Self> {
+    async fn handle_finalizer_removal(mut self, doc: DatabaseServer) -> Result<Self> {
         let (request, send) = self.0.next_request().await.expect("service not called");
         // We expect a json patch to the specified document removing our finalizer (at index 0)
         assert_eq!(request.method(), http::Method::PATCH);
@@ -150,7 +153,7 @@ impl ApiServerVerifier {
             )
         );
         let expected_patch = serde_json::json!([
-            { "op": "test", "path": "/metadata/finalizers/0", "value": DOCUMENT_FINALIZER },
+            { "op": "test", "path": "/metadata/finalizers/0", "value": DATABASE_SERVER_FINALIZER },
             { "op": "remove", "path": "/metadata/finalizers/0", "path": "/metadata/finalizers/0" }
         ]);
         let req_body = request.into_body().collect_bytes().await.unwrap();
@@ -184,7 +187,7 @@ impl ApiServerVerifier {
         Ok(self)
     }
 
-    async fn handle_status_patch(mut self, doc: Document) -> Result<Self> {
+    async fn handle_status_patch(mut self, doc: DatabaseServer) -> Result<Self> {
         let (request, send) = self.0.next_request().await.expect("service not called");
         assert_eq!(request.method(), http::Method::PATCH);
         assert_eq!(
@@ -197,8 +200,11 @@ impl ApiServerVerifier {
         let req_body = request.into_body().collect_bytes().await.unwrap();
         let json: serde_json::Value = serde_json::from_slice(&req_body).expect("patch_status object is json");
         let status_json = json.get("status").expect("status object").clone();
-        let status: DocumentStatus = serde_json::from_value(status_json).expect("valid status");
-        assert_eq!(status.hidden, doc.spec.hide, "status.hidden iff doc.spec.hide");
+        let status: DatabaseServerStatus = serde_json::from_value(status_json).expect("valid status");
+        assert_eq!(
+            status.enabled, doc.spec.enable,
+            "status.enabled iff doc.spec.enable"
+        );
         let response = serde_json::to_vec(&doc.with_status(status)).unwrap();
         // pass through document "patch accepted"
         send.send_response(Response::builder().body(Body::from(response)).unwrap());

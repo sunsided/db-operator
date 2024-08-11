@@ -17,31 +17,52 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::sync::Arc;
 use tokio::{sync::RwLock, time::Duration};
+use tokio_postgres::NoTls;
 use tracing::*;
 
-pub static DOCUMENT_FINALIZER: &str = "documents.kube.rs";
+pub static DATABASE_SERVER_FINALIZER: &str = "databaseservers.db-operator.widemeadows.de";
 
-/// Generate the Kubernetes wrapper struct `Document` from our Spec and Status struct
+/// Generate the Kubernetes wrapper struct `DatabaseServer` from our Spec and Status struct
 ///
 /// This provides a hook for generating the CRD yaml (in crdgen.rs)
 #[derive(CustomResource, Deserialize, Serialize, Clone, Debug, JsonSchema)]
 #[cfg_attr(test, derive(Default))]
-#[kube(kind = "Document", group = "kube.rs", version = "v1", namespaced)]
-#[kube(status = "DocumentStatus", shortname = "doc")]
-pub struct DocumentSpec {
-    pub title: String,
-    pub hide: bool,
-    pub content: String,
-}
-/// The status object of `Document`
-#[derive(Deserialize, Serialize, Clone, Default, Debug, JsonSchema)]
-pub struct DocumentStatus {
-    pub hidden: bool,
+#[kube(
+    kind = "DatabaseServer",
+    group = "db-operator.widemeadows.de",
+    version = "v1",
+    singular = "databaseserver",
+    plural = "databaseservers",
+    namespaced
+)]
+#[kube(status = "DatabaseServerStatus", shortname = "doc")]
+pub struct DatabaseServerSpec {
+    /// The host to connect to.
+    pub host: String,
+    /// The username of the administrative user.
+    pub user: String,
+    /// The password of the administrative user.
+    pub password: String,
+    /// The database to connect to for the administrative user; defaults to `postgres`.
+    pub dbname: Option<String>,
+    pub enable: bool,
 }
 
-impl Document {
-    fn was_hidden(&self) -> bool {
-        self.status.as_ref().map(|s| s.hidden).unwrap_or(false)
+/// The status object of `DatabaseServer`
+#[derive(Deserialize, Serialize, Clone, Default, Debug, JsonSchema)]
+pub struct DatabaseServerStatus {
+    pub enabled: bool,
+    /// Whether a connection attempt was successful.
+    pub connected: bool,
+}
+
+impl DatabaseServer {
+    fn was_enabled(&self) -> bool {
+        self.status.as_ref().map(|s| s.enabled).unwrap_or(false)
+    }
+
+    fn was_connected(&self) -> bool {
+        self.status.as_ref().map(|s| s.connected).unwrap_or(false)
     }
 }
 
@@ -57,16 +78,16 @@ pub struct Context {
 }
 
 #[instrument(skip(ctx, doc), fields(trace_id))]
-async fn reconcile(doc: Arc<Document>, ctx: Arc<Context>) -> Result<Action> {
+async fn reconcile(doc: Arc<DatabaseServer>, ctx: Arc<Context>) -> Result<Action> {
     let trace_id = telemetry::get_trace_id();
     Span::current().record("trace_id", field::display(&trace_id));
     let _timer = ctx.metrics.count_and_measure();
     ctx.diagnostics.write().await.last_event = Utc::now();
     let ns = doc.namespace().unwrap(); // doc is namespace scoped
-    let docs: Api<Document> = Api::namespaced(ctx.client.clone(), &ns);
+    let docs: Api<DatabaseServer> = Api::namespaced(ctx.client.clone(), &ns);
 
-    info!("Reconciling Document \"{}\" in {}", doc.name_any(), ns);
-    finalizer(&docs, DOCUMENT_FINALIZER, doc, |event| async {
+    info!("Reconciling DatabaseServer \"{}\" in {}", doc.name_any(), ns);
+    finalizer(&docs, DATABASE_SERVER_FINALIZER, doc, |event| async {
         match event {
             Finalizer::Apply(doc) => doc.reconcile(ctx.clone()).await,
             Finalizer::Cleanup(doc) => doc.cleanup(ctx.clone()).await,
@@ -76,44 +97,90 @@ async fn reconcile(doc: Arc<Document>, ctx: Arc<Context>) -> Result<Action> {
     .map_err(|e| Error::FinalizerError(Box::new(e)))
 }
 
-fn error_policy(doc: Arc<Document>, error: &Error, ctx: Arc<Context>) -> Action {
+fn error_policy(doc: Arc<DatabaseServer>, error: &Error, ctx: Arc<Context>) -> Action {
     warn!("reconcile failed: {:?}", error);
     ctx.metrics.reconcile_failure(&doc, error);
     Action::requeue(Duration::from_secs(5 * 60))
 }
 
-impl Document {
+impl DatabaseServer {
     // Reconcile (for non-finalizer related changes)
     async fn reconcile(&self, ctx: Arc<Context>) -> Result<Action> {
         let client = ctx.client.clone();
         let recorder = ctx.diagnostics.read().await.recorder(client.clone(), self);
         let ns = self.namespace().unwrap();
         let name = self.name_any();
-        let docs: Api<Document> = Api::namespaced(client, &ns);
+        let docs: Api<DatabaseServer> = Api::namespaced(client, &ns);
 
-        let should_hide = self.spec.hide;
-        if !self.was_hidden() && should_hide {
+        let should_enable = self.spec.enable;
+        if !self.was_enabled() && should_enable {
             // send an event once per hide
             recorder
                 .publish(Event {
                     type_: EventType::Normal,
-                    reason: "HideRequested".into(),
-                    note: Some(format!("Hiding `{name}`")),
-                    action: "Hiding".into(),
+                    reason: "EnableRequested".into(),
+                    note: Some(format!("Enabling `{name}`")),
+                    action: "Enabling".into(),
                     secondary: None,
                 })
                 .await
                 .map_err(Error::KubeError)?;
         }
-        if name == "illegal" {
-            return Err(Error::IllegalDocument); // error names show up in metrics
-        }
+
+        // TODO: Test connection
+        let connection_string = format!(
+            "host={} user={} password={} dbname={}",
+            self.spec.host,
+            self.spec.user,
+            self.spec.password,
+            self.spec.dbname.to_owned().unwrap_or(String::from("postgres"))
+        );
+        let is_connected = match tokio_postgres::connect(&connection_string, NoTls).await {
+            Ok((_client, _connection)) => {
+                if !self.was_connected() {
+                    recorder
+                        .publish(Event {
+                            type_: EventType::Normal,
+                            reason: "Connected".into(),
+                            note: Some(format!("Successfully connected to `{}`", self.spec.host)),
+                            action: "Connect".into(),
+                            secondary: None,
+                        })
+                        .await
+                        .map_err(Error::KubeError)?;
+                }
+                true
+            }
+            Err(err) => {
+                if !self.was_connected() {
+                    recorder
+                        .publish(Event {
+                            type_: EventType::Warning,
+                            reason: "ConnectionFailed".into(),
+                            note: Some(format!("Failed to connect to `{name}`: {err}")),
+                            action: "Connect".into(),
+                            secondary: None,
+                        })
+                        .await
+                        .map_err(Error::KubeError)?;
+                }
+
+                error!(
+                    "Failed to connect to database instance {}: {}",
+                    self.metadata.name.to_owned().unwrap_or_default(),
+                    err
+                );
+                false
+            }
+        };
+
         // always overwrite status object with what we saw
         let new_status = Patch::Apply(json!({
-            "apiVersion": "kube.rs/v1",
-            "kind": "Document",
-            "status": DocumentStatus {
-                hidden: should_hide,
+            "apiVersion": "db-operator.widemeadows.de/v1",
+            "kind": "DatabaseServer",
+            "status": DatabaseServerStatus {
+                enabled: should_enable,
+                connected: is_connected
             }
         }));
         let ps = PatchParams::apply("cntrlr").force();
@@ -129,7 +196,7 @@ impl Document {
     // Finalizer cleanup (the object was deleted, ensure nothing is orphaned)
     async fn cleanup(&self, ctx: Arc<Context>) -> Result<Action> {
         let recorder = ctx.diagnostics.read().await.recorder(ctx.client.clone(), self);
-        // Document doesn't have any real cleanup, so we just publish an event
+        // DatabaseServer doesn't have any real cleanup, so we just publish an event
         recorder
             .publish(Event {
                 type_: EventType::Normal,
@@ -156,12 +223,12 @@ impl Default for Diagnostics {
     fn default() -> Self {
         Self {
             last_event: Utc::now(),
-            reporter: "doc-controller".into(),
+            reporter: "db-controller".into(),
         }
     }
 }
 impl Diagnostics {
-    fn recorder(&self, client: Client, doc: &Document) -> Recorder {
+    fn recorder(&self, client: Client, doc: &DatabaseServer) -> Recorder {
         Recorder::new(client, self.reporter.clone(), doc.object_ref(&()))
     }
 }
@@ -200,7 +267,7 @@ impl State {
 /// Initialize the controller and shared state (given the crd is installed)
 pub async fn run(state: State) {
     let client = Client::try_default().await.expect("failed to create kube Client");
-    let docs = Api::<Document>::all(client.clone());
+    let docs = Api::<DatabaseServer>::all(client.clone());
     if let Err(e) = docs.list(&ListParams::default().limit(1)).await {
         error!("CRD is not queryable; {e:?}. Is the CRD installed?");
         info!("Installation: cargo run --bin crdgen | kubectl apply -f -");
@@ -217,14 +284,14 @@ pub async fn run(state: State) {
 // Mock tests relying on fixtures.rs and its primitive apiserver mocks
 #[cfg(test)]
 mod test {
-    use super::{error_policy, reconcile, Context, Document};
+    use super::{error_policy, reconcile, Context, DatabaseServer};
     use crate::fixtures::{timeout_after_1s, Scenario};
     use std::sync::Arc;
 
     #[tokio::test]
     async fn documents_without_finalizer_gets_a_finalizer() {
         let (testctx, fakeserver, _) = Context::test();
-        let doc = Document::test();
+        let doc = DatabaseServer::test();
         let mocksrv = fakeserver.run(Scenario::FinalizerCreation(doc.clone()));
         reconcile(Arc::new(doc), testctx).await.expect("reconciler");
         timeout_after_1s(mocksrv).await;
@@ -233,7 +300,7 @@ mod test {
     #[tokio::test]
     async fn finalized_doc_causes_status_patch() {
         let (testctx, fakeserver, _) = Context::test();
-        let doc = Document::test().finalized();
+        let doc = DatabaseServer::test().finalized();
         let mocksrv = fakeserver.run(Scenario::StatusPatch(doc.clone()));
         reconcile(Arc::new(doc), testctx).await.expect("reconciler");
         timeout_after_1s(mocksrv).await;
@@ -242,7 +309,7 @@ mod test {
     #[tokio::test]
     async fn finalized_doc_with_hide_causes_event_and_hide_patch() {
         let (testctx, fakeserver, _) = Context::test();
-        let doc = Document::test().finalized().needs_hide();
+        let doc = DatabaseServer::test().finalized().needs_hide();
         let scenario = Scenario::EventPublishThenStatusPatch("HideRequested".into(), doc.clone());
         let mocksrv = fakeserver.run(scenario);
         reconcile(Arc::new(doc), testctx).await.expect("reconciler");
@@ -252,7 +319,7 @@ mod test {
     #[tokio::test]
     async fn finalized_doc_with_delete_timestamp_causes_delete() {
         let (testctx, fakeserver, _) = Context::test();
-        let doc = Document::test().finalized().needs_delete();
+        let doc = DatabaseServer::test().finalized().needs_delete();
         let mocksrv = fakeserver.run(Scenario::Cleanup("DeleteRequested".into(), doc.clone()));
         reconcile(Arc::new(doc), testctx).await.expect("reconciler");
         timeout_after_1s(mocksrv).await;
@@ -261,13 +328,13 @@ mod test {
     #[tokio::test]
     async fn illegal_doc_reconcile_errors_which_bumps_failure_metric() {
         let (testctx, fakeserver, _registry) = Context::test();
-        let doc = Arc::new(Document::illegal().finalized());
+        let doc = Arc::new(DatabaseServer::illegal().finalized());
         let mocksrv = fakeserver.run(Scenario::RadioSilence);
         let res = reconcile(doc.clone(), testctx.clone()).await;
         timeout_after_1s(mocksrv).await;
         assert!(res.is_err(), "apply reconciler fails on illegal doc");
         let err = res.unwrap_err();
-        assert!(err.to_string().contains("IllegalDocument"));
+        assert!(err.to_string().contains("IllegalDatabaseServer"));
         // calling error policy with the reconciler error should cause the correct metric to be set
         error_policy(doc.clone(), &err, testctx.clone());
         //dbg!("actual metrics: {}", registry.gather());
@@ -288,8 +355,8 @@ mod test {
         let ctx = super::State::default().to_context(client.clone());
 
         // create a test doc
-        let doc = Document::test().finalized().needs_hide();
-        let docs: Api<Document> = Api::namespaced(client.clone(), "default");
+        let doc = DatabaseServer::test().finalized().needs_hide();
+        let docs: Api<DatabaseServer> = Api::namespaced(client.clone(), "default");
         let ssapply = PatchParams::apply("ctrltest");
         let patch = Patch::Apply(doc.clone());
         docs.patch("test", &ssapply, &patch).await.unwrap();
@@ -302,7 +369,8 @@ mod test {
         assert!(output.status.is_some());
         // verify hide event was found
         let events: Api<k8s_openapi::api::core::v1::Event> = Api::all(client.clone());
-        let opts = ListParams::default().fields("involvedObject.kind=Document,involvedObject.name=test");
+        let opts =
+            ListParams::default().fields("involvedObject.kind=DatabaseServer,involvedObject.name=test");
         let event = events
             .list(&opts)
             .await

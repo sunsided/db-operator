@@ -8,7 +8,7 @@ install-crd: generate
 
 generate:
   cargo run --bin crdgen > yaml/crd.yaml
-  helm template charts/doc-controller > yaml/deployment.yaml
+  helm template charts/db-controller > yaml/deployment.yaml
 
 # run with opentelemetry
 run-telemetry:

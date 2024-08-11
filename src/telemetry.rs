@@ -29,7 +29,7 @@ async fn init_tracer() -> Result<opentelemetry::sdk::trace::Tracer, InitTracerEr
         .with_trace_config(opentelemetry::sdk::trace::config().with_resource(
             opentelemetry::sdk::Resource::new(vec![opentelemetry::KeyValue::new(
                 "service.name",
-                "doc-controller",
+                "db-controller",
             )]),
         ))
         .install_batch(opentelemetry::runtime::Tokio)?;
@@ -64,14 +64,12 @@ pub async fn init() {
             tracing::subscriber::set_global_default(collector).unwrap()
         }
         Err(e) => {
-            log::warn!("OpenTelemetry not initialized: {e}");
+            eprintln!("OpenTelemetry not initialized: {e}");
         }
     }
 
     #[cfg(not(feature = "telemetry"))]
     {
-        log::debug!("OpenTelemetry support is disabled for this build");
-
         // Decide on layers
         let collector = Registry::default().with(logger).with(env_filter);
 

@@ -1,4 +1,4 @@
-use crate::{Document, Error};
+use crate::{DatabaseServer, Error};
 use kube::ResourceExt;
 use prometheus::{histogram_opts, opts, HistogramVec, IntCounter, IntCounterVec, Registry};
 use tokio::time::Instant;
@@ -14,7 +14,7 @@ impl Default for Metrics {
     fn default() -> Self {
         let reconcile_duration = HistogramVec::new(
             histogram_opts!(
-                "doc_controller_reconcile_duration_seconds",
+                "db_controller_reconcile_duration_seconds",
                 "The duration of reconcile to complete in seconds"
             )
             .buckets(vec![0.01, 0.1, 0.25, 0.5, 1., 5., 15., 60.]),
@@ -23,14 +23,14 @@ impl Default for Metrics {
         .unwrap();
         let failures = IntCounterVec::new(
             opts!(
-                "doc_controller_reconciliation_errors_total",
+                "db_controller_reconciliation_errors_total",
                 "reconciliation errors",
             ),
             &["instance", "error"],
         )
         .unwrap();
         let reconciliations =
-            IntCounter::new("doc_controller_reconciliations_total", "reconciliations").unwrap();
+            IntCounter::new("db_controller_reconciliations_total", "reconciliations").unwrap();
         Metrics {
             reconciliations,
             failures,
@@ -48,7 +48,7 @@ impl Metrics {
         Ok(self)
     }
 
-    pub fn reconcile_failure(&self, doc: &Document, e: &Error) {
+    pub fn reconcile_failure(&self, doc: &DatabaseServer, e: &Error) {
         self.failures
             .with_label_values(&[doc.name_any().as_ref(), e.metric_label().as_ref()])
             .inc()
