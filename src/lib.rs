@@ -38,3 +38,4 @@ pub use metrics::Metrics;
 mod connection;
 #[cfg(test)]
 pub mod fixtures;
+mod secrets;

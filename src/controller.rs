@@ -2,6 +2,7 @@ use crate::connection::Connection;
 use crate::{telemetry, Error, Metrics, Result};
 use chrono::{DateTime, Utc};
 use futures::StreamExt;
+use k8s_openapi::api::core::v1::Secret;
 use kube::{
     api::{Api, ListParams, Patch, PatchParams, ResourceExt},
     client::Client,
@@ -115,7 +116,8 @@ impl DatabaseServer {
         let recorder = ctx.diagnostics.read().await.recorder(client.clone(), self);
         let ns = self.namespace().unwrap();
         let name = self.name_any();
-        let docs: Api<DatabaseServer> = Api::namespaced(client, &ns);
+        let docs: Api<DatabaseServer> = Api::namespaced(client.clone(), &ns);
+        let secrets: Api<Secret> = Api::namespaced(client, &ns);
 
         let should_enable = self.spec.enable;
         if !self.was_enabled() && should_enable {
@@ -134,7 +136,7 @@ impl DatabaseServer {
 
         // Connect to the database ensure validity of configuration.
         let mut server_version = None;
-        let is_connected = match self.spec.connection.to_pg_connect_options() {
+        let is_connected = match self.spec.connection.to_pg_connect_options(&secrets).await {
             Ok(connect_options) => {
                 let host = connect_options.get_host().to_owned();
 
