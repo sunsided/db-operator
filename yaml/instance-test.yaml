@@ -4,5 +4,6 @@ metadata:
   name: test
 spec:
   connection:
-    url: postgres://myuser:mypassword@postgres/postgres
+    url:
+      value: postgres://myuser:mypassword@postgres/postgres
   enable: true

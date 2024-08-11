@@ -27,31 +27,135 @@ spec:
             properties:
               connection:
                 description: Database connection details.
+                oneOf:
+                - required:
+                  - url
+                - required:
+                  - details
                 properties:
                   details:
-                    nullable: true
                     properties:
                       dbname:
                         description: The database to connect to for the administrative user; defaults to `postgres`.
                         nullable: true
-                        type: string
+                        oneOf:
+                        - required:
+                          - value
+                        - required:
+                          - secretRef
+                        properties:
+                          secretRef:
+                            properties:
+                              key:
+                                description: The key of the connection string URL in the secret.
+                                type: string
+                              name:
+                                description: The name of the secret.
+                                type: string
+                            required:
+                            - key
+                            - name
+                            type: object
+                          value:
+                            type: string
+                        type: object
                       host:
                         description: The host to connect to.
-                        type: string
+                        oneOf:
+                        - required:
+                          - value
+                        - required:
+                          - secretRef
+                        properties:
+                          secretRef:
+                            properties:
+                              key:
+                                description: The key of the connection string URL in the secret.
+                                type: string
+                              name:
+                                description: The name of the secret.
+                                type: string
+                            required:
+                            - key
+                            - name
+                            type: object
+                          value:
+                            type: string
+                        type: object
                       password:
                         description: The password of the administrative user.
-                        type: string
+                        oneOf:
+                        - required:
+                          - value
+                        - required:
+                          - secretRef
+                        properties:
+                          secretRef:
+                            properties:
+                              key:
+                                description: The key of the connection string URL in the secret.
+                                type: string
+                              name:
+                                description: The name of the secret.
+                                type: string
+                            required:
+                            - key
+                            - name
+                            type: object
+                          value:
+                            type: string
+                        type: object
                       user:
                         description: The username of the administrative user.
-                        type: string
+                        oneOf:
+                        - required:
+                          - value
+                        - required:
+                          - secretRef
+                        properties:
+                          secretRef:
+                            properties:
+                              key:
+                                description: The key of the connection string URL in the secret.
+                                type: string
+                              name:
+                                description: The name of the secret.
+                                type: string
+                            required:
+                            - key
+                            - name
+                            type: object
+                          value:
+                            type: string
+                        type: object
                     required:
                     - host
                     - password
                     - user
                     type: object
                   url:
-                    nullable: true
-                    type: string
+                    description: A literal value.
+                    oneOf:
+                    - required:
+                      - value
+                    - required:
+                      - secretRef
+                    properties:
+                      secretRef:
+                        properties:
+                          key:
+                            description: The key of the connection string URL in the secret.
+                            type: string
+                          name:
+                            description: The name of the secret.
+                            type: string
+                        required:
+                        - key
+                        - name
+                        type: object
+                      value:
+                        type: string
+                    type: object
                 type: object
               enable:
                 type: boolean
