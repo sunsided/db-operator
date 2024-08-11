@@ -25,26 +25,39 @@ spec:
 
               This provides a hook for generating the CRD yaml (in crdgen.rs)
             properties:
-              dbname:
-                description: The database to connect to for the administrative user; defaults to `postgres`.
-                nullable: true
-                type: string
+              connection:
+                description: Database connection details.
+                properties:
+                  details:
+                    nullable: true
+                    properties:
+                      dbname:
+                        description: The database to connect to for the administrative user; defaults to `postgres`.
+                        nullable: true
+                        type: string
+                      host:
+                        description: The host to connect to.
+                        type: string
+                      password:
+                        description: The password of the administrative user.
+                        type: string
+                      user:
+                        description: The username of the administrative user.
+                        type: string
+                    required:
+                    - host
+                    - password
+                    - user
+                    type: object
+                  url:
+                    nullable: true
+                    type: string
+                type: object
               enable:
                 type: boolean
-              host:
-                description: The host to connect to.
-                type: string
-              password:
-                description: The password of the administrative user.
-                type: string
-              user:
-                description: The username of the administrative user.
-                type: string
             required:
+            - connection
             - enable
-            - host
-            - password
-            - user
             type: object
           status:
             description: The status object of `DatabaseServer`

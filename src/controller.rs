@@ -1,3 +1,4 @@
+use crate::connection::Connection;
 use crate::{telemetry, Error, Metrics, Result};
 use chrono::{DateTime, Utc};
 use futures::StreamExt;
@@ -15,7 +16,9 @@ use kube::{
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
+use sqlx::postgres::PgPoolOptions;
+use sqlx::{Pool, Postgres};
+use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::{sync::RwLock, time::Duration};
 use tracing::*;
@@ -37,14 +40,7 @@ pub static DATABASE_SERVER_FINALIZER: &str = "databaseservers.db-operator.wideme
 )]
 #[kube(status = "DatabaseServerStatus", shortname = "doc")]
 pub struct DatabaseServerSpec {
-    /// The host to connect to.
-    pub host: String,
-    /// The username of the administrative user.
-    pub user: String,
-    /// The password of the administrative user.
-    pub password: String,
-    /// The database to connect to for the administrative user; defaults to `postgres`.
-    pub dbname: Option<String>,
+    pub connection: Connection,
     pub enable: bool,
 }
 
@@ -77,6 +73,8 @@ pub struct Context {
     pub diagnostics: Arc<RwLock<Diagnostics>>,
     /// Prometheus metrics
     pub metrics: Metrics,
+    /// The connection pool for postgres servers.
+    pub servers: Arc<RwLock<HashMap<String, Pool<Postgres>>>>,
 }
 
 #[instrument(skip(ctx, doc), fields(trace_id))]
@@ -105,6 +103,11 @@ fn error_policy(doc: Arc<DatabaseServer>, error: &Error, ctx: Arc<Context>) -> A
     Action::requeue(Duration::from_secs(5 * 60))
 }
 
+#[derive(Debug, sqlx::FromRow)]
+struct PostgresVersionRow {
+    version: Option<String>,
+}
+
 impl DatabaseServer {
     // Reconcile (for non-finalizer related changes)
     async fn reconcile(&self, ctx: Arc<Context>) -> Result<Action> {
@@ -131,60 +134,83 @@ impl DatabaseServer {
 
         // Connect to the database ensure validity of configuration.
         let mut server_version = None;
-        let connect_options = PgConnectOptions::new()
-            .host(&self.spec.host)
-            .username(&self.spec.user)
-            .password(&self.spec.password)
-            .database(&self.spec.dbname.to_owned().unwrap_or(String::from("postgres")))
-            .application_name(env!("CARGO_CRATE_NAME"));
-        let is_connected = match PgPoolOptions::new()
-            .max_connections(5)
-            .connect_with(connect_options)
-            .await
-        {
-            Ok(pool) => {
-                server_version = match sqlx::query!("SELECT version();").fetch_one(&pool).await {
-                    Ok(row) => Some(row.version.unwrap_or(String::from("unknown"))),
-                    Err(_) => None,
-                };
+        let is_connected = match self.spec.connection.to_pg_connect_options() {
+            Ok(connect_options) => {
+                let host = connect_options.get_host().to_owned();
 
-                if !self.was_connected() {
-                    recorder
-                        .publish(Event {
-                            type_: EventType::Normal,
-                            reason: "Connected".into(),
-                            note: Some(format!(
-                                "Successfully connected to host `{}`: {}",
-                                self.spec.host,
-                                server_version.to_owned().unwrap_or(String::from("unknown"))
-                            )),
-                            action: "Connect".into(),
-                            secondary: None,
-                        })
+                match PgPoolOptions::new()
+                    .max_connections(5)
+                    .connect_with(connect_options)
+                    .await
+                {
+                    Ok(pool) => {
+                        server_version = match sqlx::query_as::<Postgres, PostgresVersionRow>(
+                            "SELECT version() AS version;",
+                        )
+                        .fetch_one(&pool)
                         .await
-                        .map_err(Error::KubeError)?;
+                        {
+                            Ok(row) => Some(row.version.unwrap_or(String::from("unknown"))),
+                            Err(_) => None,
+                        };
+
+                        {
+                            let mut servers = ctx.servers.write().await;
+                            servers.insert(name.clone(), pool);
+                        }
+
+                        if !self.was_connected() {
+                            recorder
+                                .publish(Event {
+                                    type_: EventType::Normal,
+                                    reason: "Connected".into(),
+                                    note: Some(format!(
+                                        "Successfully connected to host `{}`: {}",
+                                        host,
+                                        server_version.to_owned().unwrap_or(String::from("unknown"))
+                                    )),
+                                    action: "Connect".into(),
+                                    secondary: None,
+                                })
+                                .await
+                                .map_err(Error::KubeError)?;
+                        }
+                        true
+                    }
+                    Err(err) => {
+                        if !self.was_connected() {
+                            recorder
+                                .publish(Event {
+                                    type_: EventType::Warning,
+                                    reason: "ConnectionFailed".into(),
+                                    note: Some(format!("Failed to connect to `{name}`: {err}")),
+                                    action: "Connect".into(),
+                                    secondary: None,
+                                })
+                                .await
+                                .map_err(Error::KubeError)?;
+                        }
+
+                        error!(
+                            "Failed to connect to database instance {}: {}",
+                            self.metadata.name.to_owned().unwrap_or_default(),
+                            err
+                        );
+                        false
+                    }
                 }
-                true
             }
             Err(err) => {
-                if !self.was_connected() {
-                    recorder
-                        .publish(Event {
-                            type_: EventType::Warning,
-                            reason: "ConnectionFailed".into(),
-                            note: Some(format!("Failed to connect to `{name}`: {err}")),
-                            action: "Connect".into(),
-                            secondary: None,
-                        })
-                        .await
-                        .map_err(Error::KubeError)?;
-                }
-
-                error!(
-                    "Failed to connect to database instance {}: {}",
-                    self.metadata.name.to_owned().unwrap_or_default(),
-                    err
-                );
+                recorder
+                    .publish(Event {
+                        type_: EventType::Normal,
+                        reason: "ConnectionFailed".into(),
+                        note: Some(format!("Invalid connection details: {err}")),
+                        action: "Connect".into(),
+                        secondary: None,
+                    })
+                    .await
+                    .map_err(Error::KubeError)?;
                 false
             }
         };
@@ -212,6 +238,13 @@ impl DatabaseServer {
     // Finalizer cleanup (the object was deleted, ensure nothing is orphaned)
     async fn cleanup(&self, ctx: Arc<Context>) -> Result<Action> {
         let recorder = ctx.diagnostics.read().await.recorder(ctx.client.clone(), self);
+
+        // Remove the connection pool.
+        {
+            let mut servers = ctx.servers.write().await;
+            servers.remove(&self.name_any());
+        }
+
         // DatabaseServer doesn't have any real cleanup, so we just publish an event
         recorder
             .publish(Event {
@@ -276,6 +309,7 @@ impl State {
             client,
             metrics: Metrics::default().register(&self.registry).unwrap(),
             diagnostics: self.diagnostics.clone(),
+            servers: Arc::new(RwLock::new(HashMap::new())),
         })
     }
 }

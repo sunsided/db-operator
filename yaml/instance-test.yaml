@@ -3,7 +3,6 @@ kind: DatabaseServer
 metadata:
   name: test
 spec:
-  host: postgres
-  user: myuser
-  password: mypassword
+  connection:
+    url: postgres://myuser:mypassword@postgres/postgres
   enable: true

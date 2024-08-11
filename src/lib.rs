@@ -35,5 +35,6 @@ pub mod telemetry;
 mod metrics;
 pub use metrics::Metrics;
 
+mod connection;
 #[cfg(test)]
 pub mod fixtures;
