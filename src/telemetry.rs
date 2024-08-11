@@ -1,3 +1,4 @@
+use log::warn;
 use opentelemetry::trace::TraceId;
 use tracing_subscriber::{prelude::*, EnvFilter, Registry};
 
@@ -40,7 +41,7 @@ async fn init_tracer() -> Result<opentelemetry::sdk::trace::Tracer, InitTracerEr
 #[cfg(feature = "telemetry")]
 #[derive(Debug, thiserror::Error)]
 pub enum InitTracerError {
-    #[error("Need an OTEL tracing collector configured")]
+    #[error("The environment variable OPENTELEMETRY_ENDPOINT_URL was unset")]
     NoEndpointConfigured(#[from] std::env::VarError),
     #[error(transparent)]
     TraceError(#[from] opentelemetry::trace::TraceError),
@@ -55,16 +56,23 @@ pub async fn init() {
 
     // Setup tracing layers
     #[cfg(feature = "telemetry")]
-    if let Ok(tracer) = init_tracer().await {
-        let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
-        let collector = Registry::default().with(telemetry).with(logger).with(env_filter);
+    match init_tracer().await {
+        Ok(tracer) => {
+            let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
+            let collector = Registry::default().with(telemetry).with(logger).with(env_filter);
 
-        // Initialize tracing
-        tracing::subscriber::set_global_default(collector).unwrap()
+            // Initialize tracing
+            tracing::subscriber::set_global_default(collector).unwrap()
+        }
+        Err(e) => {
+            warn!("OpenTelemetry not initialized: {e}");
+        }
     }
 
     #[cfg(not(feature = "telemetry"))]
     {
+        debug!("OpenTelemetry support is disabled for this build");
+
         // Decide on layers
         let collector = Registry::default().with(logger).with(env_filter);
 

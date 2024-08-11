@@ -1,7 +1,11 @@
 #![allow(unused_imports, unused_variables)]
+
 use actix_web::{get, middleware, web::Data, App, HttpRequest, HttpResponse, HttpServer, Responder};
 pub use controller::{self, telemetry, State};
 use prometheus::{Encoder, TextEncoder};
+use std::env;
+use structured_logger::async_json::new_writer;
+use structured_logger::Builder;
 
 #[get("/metrics")]
 async fn metrics(c: Data<State>, _req: HttpRequest) -> impl Responder {
@@ -25,9 +29,11 @@ async fn index(c: Data<State>, _req: HttpRequest) -> impl Responder {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    dotenvy::dotenv().ok();
+    init_logging();
     telemetry::init().await;
 
-    // Initiatilize Kubernetes controller state
+    // Initialize Kubernetes controller state
     let state = State::default();
     let controller = controller::run(state.clone());
 
@@ -46,4 +52,11 @@ async fn main() -> anyhow::Result<()> {
     // Both runtimes implements graceful shutdown, so poll until both are done
     tokio::join!(controller, server.run()).1?;
     Ok(())
+}
+
+fn init_logging() {
+    let log_level = env::var("RUST_LOG").unwrap_or_else(|_| "info".to_string());
+    Builder::with_level("info")
+        .with_target_writer("*", new_writer(tokio::io::stdout()))
+        .init();
 }
