@@ -1,15 +1,18 @@
-## controller-rs
+## db-operator
+
 [![ci](https://github.com/kube-rs/controller-rs/actions/workflows/ci.yml/badge.svg)](https://github.com/kube-rs/controller-rs/actions/workflows/ci.yml)
 [![docker image](https://img.shields.io/docker/pulls/clux/controller.svg)](
 https://hub.docker.com/r/clux/controller/tags/)
 
-A rust kubernetes reference controller for a [`Document` resource](https://github.com/kube-rs/controller-rs/blob/main/yaml/crd.yaml) using [kube](https://github.com/kube-rs/kube/), with observability instrumentation.
+A Rust Kubernetes operator for database management, with observability instrumentation.
 
-The `Controller` object reconciles `Document` instances when changes to it are detected, writes to its `.status` object, creates associated events, and uses finalizers for guaranteed delete handling.
+The `Controller` object reconciles `Document` instances when changes to it are detected, writes to its `.status` object,
+creates associated events, and uses finalizers for guaranteed delete handling.
 
 ## Installation
 
 ### CRD
+
 Apply the CRD from [cached file](yaml/crd.yaml), or pipe it from `crdgen` to pickup schema changes:
 
 ```sh
@@ -26,7 +29,7 @@ kubectl wait --for=condition=available deploy/doc-controller --timeout=30s
 kubectl port-forward service/doc-controller 8080:80
 ```
 
-### Opentelemetry
+### OpenTelemetry
 
 Build and run with `telemetry` feature, or configure it via `helm`:
 
@@ -34,9 +37,14 @@ Build and run with `telemetry` feature, or configure it via `helm`:
 helm template charts/doc-controller --set tracing.enabled=true | kubectl apply -f -
 ```
 
-This requires an opentelemetry collector in your cluster. [Tempo](https://github.com/grafana/helm-charts/tree/main/charts/tempo) / [opentelemetry-operator](https://github.com/open-telemetry/opentelemetry-helm-charts/tree/main/charts/opentelemetry-operator) / [grafana agent](https://github.com/grafana/helm-charts/tree/main/charts/agent-operator) should all work out of the box. If your collector does not support grpc otlp you need to change the exporter in [`telemetry.rs`](./src/telemetry.rs).
+This requires an OpenTelemetry collector in your
+cluster. [Tempo](https://github.com/grafana/helm-charts/tree/main/charts/tempo) / [opentelemetry-operator](https://github.com/open-telemetry/opentelemetry-helm-charts/tree/main/charts/opentelemetry-operator) / [grafana agent](https://github.com/grafana/helm-charts/tree/main/charts/agent-operator)
+should all work out of the box. If your collector does not support grpc otlp you need to change the exporter in [
+`telemetry.rs`](./src/telemetry.rs).
 
-Note that the [images are pushed either with or without the telemetry feature](https://hub.docker.com/r/clux/controller/tags/) depending on whether the tag includes `otel`.
+Note that
+the [images are pushed either with or without the telemetry feature](https://hub.docker.com/r/clux/controller/tags/)
+depending on whether the tag includes `otel`.
 
 ### Metrics
 
@@ -61,11 +69,15 @@ OPENTELEMETRY_ENDPOINT_URL=https://0.0.0.0:55680 RUST_LOG=info,kube=trace,contro
 ```
 
 ### In-cluster
-For prebuilt, edit the [chart values](./charts/doc-controller/values.yaml) or [snapshotted yaml](./yaml/deployment.yaml) and apply as you see fit (like above).
 
-To develop by building and deploying the image quickly, we recommend using [tilt](https://tilt.dev/), via `tilt up` instead.
+For prebuilt, edit the [chart values](./charts/doc-controller/values.yaml) or [snapshotted yaml](./yaml/deployment.yaml)
+and apply as you see fit (like above).
+
+To develop by building and deploying the image quickly, we recommend using [tilt](https://tilt.dev/), via `tilt up`
+instead.
 
 ## Usage
+
 In either of the run scenarios, your app is listening on port `8080`, and it will observe `Document` events.
 
 Try some of:
@@ -76,9 +88,11 @@ kubectl delete doc lorem
 kubectl edit doc lorem # change hidden
 ```
 
-The reconciler will run and write the status object on every change. You should see results in the logs of the pod, or on the `.status` object outputs of `kubectl get doc -oyaml`.
+The reconciler will run and write the status object on every change. You should see results in the logs of the pod, or
+on the `.status` object outputs of `kubectl get doc -oyaml`.
 
 ### Webapp output
+
 The sample web server exposes some example metrics and debug information you can inspect with `curl`.
 
 ```sh
@@ -110,6 +124,39 @@ $ curl 0.0.0.0:8080/
 The metrics will be scraped by prometheus if you setup a`ServiceMonitor` for it.
 
 ### Events
-The example `reconciler` only checks the `.spec.hidden` bool. If it does, it updates the `.status` object to reflect whether or not the instance `is_hidden`. It also sends a Kubernetes event associated with the controller. It is visible at the bottom of `kubectl describe doc samuel`.
 
-To extend this controller for a real-world setting. Consider looking at the [kube.rs controller guide](https://kube.rs/controllers/intro/).
+The example `reconciler` only checks the `.spec.hidden` bool. If it does, it updates the `.status` object to reflect
+whether the instance `is_hidden`. It also sends a Kubernetes event associated with the controller. It is visible
+at the bottom of `kubectl describe doc samuel`.
+
+To extend this controller for a real-world setting. Consider looking at
+the [kube.rs controller guide](https://kube.rs/controllers/intro/).
+
+## Kubernetes In Docker
+
+### Using MicroK8s (for Ubuntu users)
+
+Install:
+
+```shell
+sudo snap install microk8s --classic && \
+sudo microk8s.enable dns && \
+sudo microk8s.enable registry
+```
+
+Fetch the configuration and merge it into your `.kube/config` file.
+
+```shell
+sudo microk8s.kubectl config view --flatten
+```
+
+You can use [kubectx](https://github.com/ahmetb/kubectx) to switch the contexts quickly.
+
+### Using ctlptl and kind
+
+Use [ctlptl](https://github.com/tilt-dev/ctlptl) and [kind](https://kind.sigs.k8s.io/) to create a cluster:
+
+```shell
+ctlptl create registry ctlptl-registry --port=5005
+ctlptl create cluster kind --registry=ctlptl-registry --name=kind-db-operator
+```
