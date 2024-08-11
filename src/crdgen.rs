@@ -1,7 +1,6 @@
+use controller::DatabaseServer;
 use kube::CustomResourceExt;
+
 fn main() {
-    print!(
-        "{}",
-        serde_yaml::to_string(&controller::DatabaseServer::crd()).unwrap()
-    )
+    print!("{}", serde_yaml::to_string(&DatabaseServer::crd()).unwrap())
 }

@@ -1,13 +1,16 @@
 //! Helper methods only available for tests
-use crate::{
-    Context, DatabaseServer, DatabaseServerSpec, DatabaseServerStatus, Metrics, Result,
-    DATABASE_SERVER_FINALIZER,
+
+use crate::controllers::database_server::{
+    DatabaseServerSpec, DatabaseServerStatus, DATABASE_SERVER_FINALIZER,
 };
+use crate::{Context, DatabaseServer, Metrics, Result};
 use assert_json_diff::assert_json_include;
 use http::{Request, Response};
 use kube::{client::Body, Client, Resource, ResourceExt};
 use prometheus::Registry;
+use std::collections::HashMap;
 use std::sync::Arc;
+use tokio::sync::RwLock;
 
 impl DatabaseServer {
     /// A document that will cause the reconciler to fail
@@ -33,7 +36,7 @@ impl DatabaseServer {
     /// Modify document to set a deletion timestamp
     pub fn needs_delete(mut self) -> Self {
         use chrono::prelude::{DateTime, TimeZone, Utc};
-        let now: DateTime<Utc> = Utc.with_ymd_and_hms(2017, 04, 02, 12, 50, 32).unwrap();
+        let now: DateTime<Utc> = Utc.with_ymd_and_hms(2017, 4, 2, 12, 50, 32).unwrap();
         use k8s_openapi::apimachinery::pkg::apis::meta::v1::Time;
         self.meta_mut().deletion_timestamp = Some(Time(now));
         self
@@ -222,6 +225,7 @@ impl Context {
             client: mock_client,
             metrics: Metrics::default().register(&registry).unwrap(),
             diagnostics: Arc::default(),
+            servers: Arc::new(RwLock::new(HashMap::new())),
         };
         (Arc::new(ctx), ApiServerVerifier(handle), registry)
     }

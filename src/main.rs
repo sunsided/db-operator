@@ -1,14 +1,12 @@
 #![allow(unused_imports, unused_variables)]
 
 use actix_web::{get, middleware, web::Data, App, HttpRequest, HttpResponse, HttpServer, Responder};
-pub use controller::{self, telemetry, State};
+use controller::State;
+use controller::{controllers, telemetry};
 use prometheus::{Encoder, TextEncoder};
-use std::env;
-use tracing_subscriber::layer::SubscriberExt;
-use tracing_subscriber::util::SubscriberInitExt;
 
 #[get("/metrics")]
-async fn metrics(c: Data<State>, _req: HttpRequest) -> impl Responder {
+async fn prometheus_metrics(c: Data<State>, _req: HttpRequest) -> impl Responder {
     let metrics = c.metrics();
     let encoder = TextEncoder::new();
     let mut buffer = vec![];
@@ -43,7 +41,7 @@ async fn main() -> anyhow::Result<()> {
             .wrap(middleware::Logger::default().exclude("/health"))
             .service(index)
             .service(health)
-            .service(metrics)
+            .service(prometheus_metrics)
     })
     .bind("0.0.0.0:8080")?
     .shutdown_timeout(5);

@@ -1,4 +1,4 @@
-use crate::{DatabaseServer, Error};
+use crate::{database_server::DatabaseServer, Error};
 use kube::ResourceExt;
 use prometheus::{histogram_opts, opts, HistogramVec, IntCounter, IntCounterVec, Registry};
 use tokio::time::Instant;
