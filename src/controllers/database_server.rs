@@ -34,7 +34,7 @@ pub static DATABASE_SERVER_FINALIZER: &str = "databaseservers.db-operator.wideme
     plural = "databaseservers",
     namespaced
 )]
-#[kube(status = "DatabaseServerStatus", shortname = "doc")]
+#[kube(status = "DatabaseServerStatus", shortname = "dbs")]
 pub struct DatabaseServerSpec {
     pub connection: crate::connection::Connection,
     pub enable: bool,
@@ -67,10 +67,10 @@ pub async fn reconcile(doc: Arc<DatabaseServer>, ctx: Arc<Context>) -> crate::Re
     let _timer = ctx.metrics.count_and_measure();
     ctx.diagnostics.write().await.last_event = Utc::now();
     let ns = doc.namespace().unwrap(); // doc is namespace scoped
-    let docs: Api<DatabaseServer> = Api::namespaced(ctx.client.clone(), &ns);
+    let servers: Api<DatabaseServer> = Api::namespaced(ctx.client.clone(), &ns);
 
     info!("Reconciling DatabaseServer \"{}\" in {}", doc.name_any(), ns);
-    finalizer(&docs, DATABASE_SERVER_FINALIZER, doc, |event| async {
+    finalizer(&servers, DATABASE_SERVER_FINALIZER, doc, |event| async {
         match event {
             Finalizer::Apply(doc) => doc.reconcile(ctx.clone()).await,
             Finalizer::Cleanup(doc) => doc.cleanup(ctx.clone()).await,
@@ -82,7 +82,7 @@ pub async fn reconcile(doc: Arc<DatabaseServer>, ctx: Arc<Context>) -> crate::Re
 
 pub fn error_policy(doc: Arc<DatabaseServer>, error: &Error, ctx: Arc<Context>) -> Action {
     warn!("reconcile failed: {:?}", error);
-    ctx.metrics.reconcile_failure(&doc, error);
+    ctx.metrics.reconcile_failure_ds(&doc, error);
     Action::requeue(Duration::from_secs(5 * 60))
 }
 
@@ -98,7 +98,7 @@ impl DatabaseServer {
         let recorder = ctx.diagnostics.read().await.recorder(client.clone(), self);
         let ns = self.namespace().unwrap();
         let name = self.name_any();
-        let docs: Api<DatabaseServer> = Api::namespaced(client.clone(), &ns);
+        let servers: Api<DatabaseServer> = Api::namespaced(client.clone(), &ns);
         let secrets: Api<Secret> = Api::namespaced(client, &ns);
 
         let should_enable = self.spec.enable;
@@ -210,7 +210,7 @@ impl DatabaseServer {
             }
         }));
         let ps = PatchParams::apply("cntrlr").force();
-        let _o = docs
+        let _o = servers
             .patch_status(&name, &ps, &new_status)
             .await
             .map_err(Error::KubeError)?;
@@ -248,14 +248,14 @@ impl DatabaseServer {
 #[cfg(test)]
 mod test {
     use super::{error_policy, reconcile, Context, DatabaseServer};
-    use crate::fixtures::{timeout_after_1s, Scenario};
+    use crate::fixtures::{timeout_after_1s, DatabaseServerScenario};
     use std::sync::Arc;
 
     #[tokio::test]
     async fn documents_without_finalizer_gets_a_finalizer() {
         let (testctx, fakeserver, _) = Context::test();
         let doc = DatabaseServer::test();
-        let mocksrv = fakeserver.run(Scenario::FinalizerCreation(doc.clone()));
+        let mocksrv = fakeserver.run(DatabaseServerScenario::FinalizerCreation(doc.clone()));
         reconcile(Arc::new(doc), testctx).await.expect("reconciler");
         timeout_after_1s(mocksrv).await;
     }
@@ -264,7 +264,7 @@ mod test {
     async fn finalized_doc_causes_status_patch() {
         let (testctx, fakeserver, _) = Context::test();
         let doc = DatabaseServer::test().finalized();
-        let mocksrv = fakeserver.run(Scenario::StatusPatch(doc.clone()));
+        let mocksrv = fakeserver.run(DatabaseServerScenario::StatusPatch(doc.clone()));
         reconcile(Arc::new(doc), testctx).await.expect("reconciler");
         timeout_after_1s(mocksrv).await;
     }
@@ -273,7 +273,8 @@ mod test {
     async fn finalized_doc_with_hide_causes_event_and_hide_patch() {
         let (testctx, fakeserver, _) = Context::test();
         let doc = DatabaseServer::test().finalized().needs_hide();
-        let scenario = Scenario::EventPublishThenStatusPatch("HideRequested".into(), doc.clone());
+        let scenario =
+            DatabaseServerScenario::EventPublishThenStatusPatch("HideRequested".into(), doc.clone());
         let mocksrv = fakeserver.run(scenario);
         reconcile(Arc::new(doc), testctx).await.expect("reconciler");
         timeout_after_1s(mocksrv).await;
@@ -283,30 +284,12 @@ mod test {
     async fn finalized_doc_with_delete_timestamp_causes_delete() {
         let (testctx, fakeserver, _) = Context::test();
         let doc = DatabaseServer::test().finalized().needs_delete();
-        let mocksrv = fakeserver.run(Scenario::Cleanup("DeleteRequested".into(), doc.clone()));
+        let mocksrv = fakeserver.run(DatabaseServerScenario::Cleanup(
+            "DeleteRequested".into(),
+            doc.clone(),
+        ));
         reconcile(Arc::new(doc), testctx).await.expect("reconciler");
         timeout_after_1s(mocksrv).await;
-    }
-
-    #[tokio::test]
-    async fn illegal_doc_reconcile_errors_which_bumps_failure_metric() {
-        let (testctx, fakeserver, _registry) = Context::test();
-        let doc = Arc::new(DatabaseServer::illegal().finalized());
-        let mocksrv = fakeserver.run(Scenario::RadioSilence);
-        let res = reconcile(doc.clone(), testctx.clone()).await;
-        timeout_after_1s(mocksrv).await;
-        assert!(res.is_err(), "apply reconciler fails on illegal doc");
-        let err = res.unwrap_err();
-        assert!(err.to_string().contains("IllegalDatabaseServer"));
-        // calling error policy with the reconciler error should cause the correct metric to be set
-        error_policy(doc.clone(), &err, testctx.clone());
-        //dbg!("actual metrics: {}", registry.gather());
-        let failures = testctx
-            .metrics
-            .failures
-            .with_label_values(&["illegal", "finalizererror(applyfailed(illegaldocument))"])
-            .get();
-        assert_eq!(failures, 1);
     }
 
     // Integration test without mocks

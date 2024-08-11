@@ -15,6 +15,7 @@ mod connection;
 pub mod fixtures;
 mod secrets;
 
+use crate::controllers::database::Database;
 use crate::controllers::database_server;
 use chrono::{DateTime, Utc};
 pub use controllers::database_server::DatabaseServer;
@@ -117,6 +118,10 @@ impl Default for Diagnostics {
 
 impl Diagnostics {
     pub fn recorder(&self, client: Client, doc: &DatabaseServer) -> Recorder {
+        Recorder::new(client, self.reporter.clone(), doc.object_ref(&()))
+    }
+
+    pub fn recorder_db(&self, client: Client, doc: &Database) -> Recorder {
         Recorder::new(client, self.reporter.clone(), doc.object_ref(&()))
     }
 }

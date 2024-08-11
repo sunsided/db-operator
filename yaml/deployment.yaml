@@ -69,12 +69,15 @@ apiVersion: rbac.authorization.k8s.io/v1
 metadata:
   name: db-controller
 rules:
+  # Access to the controller resources.
   - apiGroups: [ "db-operator.widemeadows.de" ]
     resources: [ "databaseservers", "databaseservers/status", "databaseservers/finalizers" ]
     verbs: [ "get", "list", "watch", "patch", "update" ]
+  # Access to the database connection secrets.
   - apiGroups: [ "" ]
     resources: [ "secrets" ]
     verbs: [ "get" ]
+  # Creation of controller events.
   - apiGroups: [ "events.k8s.io" ]
     resources: [ "events" ]
     verbs: [ "create" ]

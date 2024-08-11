@@ -1,3 +1,4 @@
+use crate::controllers::database::Database;
 use crate::{database_server::DatabaseServer, Error};
 use kube::ResourceExt;
 use prometheus::{histogram_opts, opts, HistogramVec, IntCounter, IntCounterVec, Registry};
@@ -26,7 +27,7 @@ impl Default for Metrics {
                 "db_controller_reconciliation_errors_total",
                 "reconciliation errors",
             ),
-            &["instance", "error"],
+            &["instance", "error", "cr_type"],
         )
         .unwrap();
         let reconciliations =
@@ -48,9 +49,19 @@ impl Metrics {
         Ok(self)
     }
 
-    pub fn reconcile_failure(&self, doc: &DatabaseServer, e: &Error) {
+    pub fn reconcile_failure_ds(&self, doc: &DatabaseServer, e: &Error) {
         self.failures
-            .with_label_values(&[doc.name_any().as_ref(), e.metric_label().as_ref()])
+            .with_label_values(&[
+                doc.name_any().as_ref(),
+                e.metric_label().as_ref(),
+                "DatabaseServer",
+            ])
+            .inc()
+    }
+
+    pub fn reconcile_failure_db(&self, doc: &Database, e: &Error) {
+        self.failures
+            .with_label_values(&[doc.name_any().as_ref(), e.metric_label().as_ref(), "Database"])
             .inc()
     }
 

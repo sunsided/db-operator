@@ -188,3 +188,77 @@ spec:
     storage: true
     subresources:
       status: {}
+
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: databases.db-operator.widemeadows.de
+spec:
+  group: db-operator.widemeadows.de
+  names:
+    categories: []
+    kind: Database
+    plural: databases
+    shortNames:
+    - doc
+    singular: database
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns: []
+    name: v1
+    schema:
+      openAPIV3Schema:
+        description: Auto-generated derived type for DatabaseServerSpec via `CustomResource`
+        properties:
+          spec:
+            description: |-
+              Generate the Kubernetes wrapper struct `Database` from our Spec and Status struct
+
+              This provides a hook for generating the CRD yaml (in crdgen.rs)
+            properties:
+              comment:
+                description: The optional comment to add to the database.
+                nullable: true
+                type: string
+              create:
+                description: Whether to create the database when reconciling the resource.
+                nullable: true
+                type: boolean
+              delete:
+                description: Whether to delete the database when removing the resource.
+                type: boolean
+              name:
+                description: The name of the database to create.
+                type: string
+              serverRef:
+                description: A reference to the `DatabaseServer` instance to use.
+                properties:
+                  name:
+                    description: A reference to the `DatabaseServer` instance.
+                    type: string
+                required:
+                - name
+                type: object
+            required:
+            - delete
+            - name
+            - serverRef
+            type: object
+          status:
+            description: The status object of `Database`
+            nullable: true
+            properties:
+              created:
+                type: boolean
+            required:
+            - created
+            type: object
+        required:
+        - spec
+        title: Database
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

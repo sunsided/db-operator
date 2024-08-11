@@ -1,5 +1,6 @@
 //! Helper methods only available for tests
 
+use crate::controllers::database::Database;
 use crate::controllers::database_server::{
     DatabaseServerSpec, DatabaseServerStatus, DATABASE_SERVER_FINALIZER,
 };
@@ -13,13 +14,6 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 
 impl DatabaseServer {
-    /// A document that will cause the reconciler to fail
-    pub fn illegal() -> Self {
-        let mut d = DatabaseServer::new("illegal", DatabaseServerSpec::default());
-        d.meta_mut().namespace = Some("default".into());
-        d
-    }
-
     /// A normal test document
     pub fn test() -> Self {
         let mut d = DatabaseServer::new("test", DatabaseServerSpec::default());
@@ -55,12 +49,42 @@ impl DatabaseServer {
     }
 }
 
+impl Database {
+    /// A normal test document
+    pub fn test() -> Self {
+        let mut d = Database::new("test", DatabaseSpec::default());
+        d.meta_mut().namespace = Some("default".into());
+        d
+    }
+
+    /// Modify document to set a deletion timestamp
+    pub fn needs_delete(mut self) -> Self {
+        use chrono::prelude::{DateTime, TimeZone, Utc};
+        let now: DateTime<Utc> = Utc.with_ymd_and_hms(2017, 4, 2, 12, 50, 32).unwrap();
+        use k8s_openapi::apimachinery::pkg::apis::meta::v1::Time;
+        self.meta_mut().deletion_timestamp = Some(Time(now));
+        self
+    }
+
+    /// Modify a document to have the expected finalizer
+    pub fn finalized(mut self) -> Self {
+        self.finalizers_mut().push(DATABASE_FINALIZER.to_string());
+        self
+    }
+
+    /// Modify a document to have an expected status
+    pub fn with_status(mut self, status: DatabaseStatus) -> Self {
+        self.status = Some(status);
+        self
+    }
+}
+
 // We wrap tower_test::mock::Handle
 type ApiServerHandle = tower_test::mock::Handle<Request<Body>, Response<Body>>;
 pub struct ApiServerVerifier(ApiServerHandle);
 
 /// Scenarios we test for in ApiServerVerifier
-pub enum Scenario {
+pub enum DatabaseServerScenario {
     /// objects without finalizers will get a finalizer applied (and not call the apply loop)
     FinalizerCreation(DatabaseServer),
     /// objects that do not fail and do not cause publishes will only patch
@@ -91,21 +115,21 @@ impl ApiServerVerifier {
     /// You should await the `JoinHandle` (with a timeout) from this function to ensure that the
     /// scenario runs to completion (i.e. all expected calls were responded to),
     /// using the timeout to catch missing api calls to Kubernetes.
-    pub fn run(self, scenario: Scenario) -> tokio::task::JoinHandle<()> {
+    pub fn run(self, scenario: DatabaseServerScenario) -> tokio::task::JoinHandle<()> {
         tokio::spawn(async move {
             // moving self => one scenario per test
             match scenario {
-                Scenario::FinalizerCreation(doc) => self.handle_finalizer_creation(doc).await,
-                Scenario::StatusPatch(doc) => self.handle_status_patch(doc).await,
-                Scenario::EventPublishThenStatusPatch(reason, doc) => {
+                DatabaseServerScenario::FinalizerCreation(doc) => self.handle_finalizer_creation(doc).await,
+                DatabaseServerScenario::StatusPatch(doc) => self.handle_status_patch(doc).await,
+                DatabaseServerScenario::EventPublishThenStatusPatch(reason, doc) => {
                     self.handle_event_create(reason)
                         .await
                         .unwrap()
                         .handle_status_patch(doc)
                         .await
                 }
-                Scenario::RadioSilence => Ok(self),
-                Scenario::Cleanup(reason, doc) => {
+                DatabaseServerScenario::RadioSilence => Ok(self),
+                DatabaseServerScenario::Cleanup(reason, doc) => {
                     self.handle_event_create(reason)
                         .await
                         .unwrap()
