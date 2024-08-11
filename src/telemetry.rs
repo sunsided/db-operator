@@ -14,9 +14,8 @@ pub fn get_trace_id() -> TraceId {
 }
 
 #[cfg(feature = "telemetry")]
-async fn init_tracer() -> opentelemetry::sdk::trace::Tracer {
-    let otlp_endpoint =
-        std::env::var("OPENTELEMETRY_ENDPOINT_URL").expect("Need a otel tracing collector configured");
+async fn init_tracer() -> Result<opentelemetry::sdk::trace::Tracer, InitTracerError> {
+    let otlp_endpoint = std::env::var("OPENTELEMETRY_ENDPOINT_URL")?;
 
     let channel = tonic::transport::Channel::from_shared(otlp_endpoint)
         .unwrap()
@@ -24,7 +23,7 @@ async fn init_tracer() -> opentelemetry::sdk::trace::Tracer {
         .await
         .unwrap();
 
-    opentelemetry_otlp::new_pipeline()
+    let tracer = opentelemetry_otlp::new_pipeline()
         .tracing()
         .with_exporter(opentelemetry_otlp::new_exporter().tonic().with_channel(channel))
         .with_trace_config(opentelemetry::sdk::trace::config().with_resource(
@@ -33,28 +32,45 @@ async fn init_tracer() -> opentelemetry::sdk::trace::Tracer {
                 "doc-controller",
             )]),
         ))
-        .install_batch(opentelemetry::runtime::Tokio)
-        .unwrap()
+        .install_batch(opentelemetry::runtime::Tokio)?;
+
+    Ok(tracer)
+}
+
+#[cfg(feature = "telemetry")]
+#[derive(Debug, thiserror::Error)]
+pub enum InitTracerError {
+    #[error("Need an OTEL tracing collector configured")]
+    NoEndpointConfigured(#[from] std::env::VarError),
+    #[error(transparent)]
+    TraceError(#[from] opentelemetry::trace::TraceError),
 }
 
 /// Initialize tracing
 pub async fn init() {
-    // Setup tracing layers
-    #[cfg(feature = "telemetry")]
-    let telemetry = tracing_opentelemetry::layer().with_tracer(init_tracer().await);
     let logger = tracing_subscriber::fmt::layer().compact();
     let env_filter = EnvFilter::try_from_default_env()
         .or(EnvFilter::try_new("info"))
         .unwrap();
 
-    // Decide on layers
+    // Setup tracing layers
     #[cfg(feature = "telemetry")]
-    let collector = Registry::default().with(telemetry).with(logger).with(env_filter);
-    #[cfg(not(feature = "telemetry"))]
-    let collector = Registry::default().with(logger).with(env_filter);
+    if let Ok(tracer) = init_tracer().await {
+        let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
+        let collector = Registry::default().with(telemetry).with(logger).with(env_filter);
 
-    // Initialize tracing
-    tracing::subscriber::set_global_default(collector).unwrap();
+        // Initialize tracing
+        tracing::subscriber::set_global_default(collector).unwrap()
+    }
+
+    #[cfg(not(feature = "telemetry"))]
+    {
+        // Decide on layers
+        let collector = Registry::default().with(logger).with(env_filter);
+
+        // Initialize tracing
+        tracing::subscriber::set_global_default(collector).unwrap()
+    }
 }
 
 #[cfg(test)]
