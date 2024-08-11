@@ -15,9 +15,9 @@ use kube::{
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use std::sync::Arc;
 use tokio::{sync::RwLock, time::Duration};
-use tokio_postgres::NoTls;
 use tracing::*;
 
 pub static DATABASE_SERVER_FINALIZER: &str = "databaseservers.db-operator.widemeadows.de";
@@ -127,16 +127,19 @@ impl DatabaseServer {
                 .map_err(Error::KubeError)?;
         }
 
-        // TODO: Test connection
-        let connection_string = format!(
-            "host={} user={} password={} dbname={}",
-            self.spec.host,
-            self.spec.user,
-            self.spec.password,
-            self.spec.dbname.to_owned().unwrap_or(String::from("postgres"))
-        );
-        let is_connected = match tokio_postgres::connect(&connection_string, NoTls).await {
-            Ok((_client, _connection)) => {
+        // Connect to the database ensure validity of configuration.
+        let connect_options = PgConnectOptions::new()
+            .host(&self.spec.host)
+            .username(&self.spec.user)
+            .password(&self.spec.password)
+            .database(&self.spec.dbname.to_owned().unwrap_or(String::from("postgres")))
+            .application_name(env!("CARGO_CRATE_NAME"));
+        let is_connected = match PgPoolOptions::new()
+            .max_connections(5)
+            .connect_with(connect_options)
+            .await
+        {
+            Ok(_pool) => {
                 if !self.was_connected() {
                     recorder
                         .publish(Event {

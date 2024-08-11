@@ -47,7 +47,7 @@ anyhow = "1.0.86"
 log = "0.4.22"
 dotenvy = "0.15.7"
 env_logger = "0.11.5"
-tokio-postgres = "0.7.11"
+sqlx = { version = "0.8.0", features = ["postgres", "runtime-tokio-native-tls", "macros"] }
 
 [dev-dependencies]
 assert-json-diff = "2.0.2"
