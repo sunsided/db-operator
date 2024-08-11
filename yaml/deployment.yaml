@@ -282,10 +282,6 @@ spec:
 
               This provides a hook for generating the CRD yaml (in crdgen.rs)
             properties:
-              comment:
-                description: The optional comment to add to the database.
-                nullable: true
-                type: string
               create:
                 description: Whether to create the database when reconciling the resource.
                 nullable: true
@@ -303,6 +299,7 @@ spec:
                       nullable: true
                       properties:
                         grants:
+                          description: The granted privileges.
                           items:
                             enum:
                             - CONNECT
@@ -323,6 +320,7 @@ spec:
                       nullable: true
                       properties:
                         grants:
+                          description: The granted privileges.
                           items:
                             enum:
                             - USAGE
@@ -336,11 +334,12 @@ spec:
                       - grants
                       - name
                       type: object
-                    tables:
+                    table:
                       description: A set of table-specific grants.
                       nullable: true
                       properties:
                         grants:
+                          description: The granted privileges.
                           items:
                             enum:
                             - SELECT
@@ -354,6 +353,11 @@ spec:
                             type: string
                           type: array
                         name:
+                          description: The table name.
+                          type: string
+                        schema:
+                          description: The schema name.
+                          nullable: true
                           type: string
                       required:
                       - grants

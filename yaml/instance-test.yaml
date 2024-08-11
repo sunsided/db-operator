@@ -1,25 +1,4 @@
 ---
-apiVersion: v1
-kind: Secret
-metadata:
-  name: my-test-database-secret
-type: Opaque
-data:
-  connectionString: cG9zdGdyZXM6Ly9teXVzZXI6bXlwYXNzd29yZEBwb3N0Z3Jlcy9wb3N0Z3Jlcw==
----
-apiVersion: db-operator.widemeadows.de/v1
-kind: DatabaseServer
-metadata:
-  name: postgres-test
-spec:
-  connection:
-    url:
-      # value: postgres://myuser:mypassword@postgres/postgres
-      secretRef:
-        name: my-test-database-secret
-        key: connectionString
-  enable: true
----
 apiVersion: db-operator.widemeadows.de/v1
 kind: Database
 metadata:
@@ -28,7 +7,6 @@ spec:
   serverRef:
     name: postgres-test
   name: test
-  comment: "A test database"
   create: true
   delete: true
   grants:

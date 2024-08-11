@@ -221,7 +221,7 @@ impl Database {
                 for privilege in &db_grant.grants {
                     let privilege = privilege.to_sql();
                     match sqlx::query::<Postgres>(&format!(
-                        "GRANT {privilege} ON \"{database_name}\" TO \"{user_name}\";"
+                        "GRANT {privilege} ON DATABASE \"{database_name}\" TO \"{user_name}\";"
                     ))
                     .execute(pool)
                     .await
