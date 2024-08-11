@@ -1,3 +1,10 @@
+//! # db-operator
+//!
+//! This is the application's main entry point that provides the controller API
+//! for Kubernetes to call. The application logic is bundled in the `controller` crate,
+//! which is found in [`lib.rs`](lib.rs).
+
+#![forbid(unsafe_code)]
 #![allow(unused_imports, unused_variables)]
 
 use actix_web::{get, middleware, web::Data, App, HttpRequest, HttpResponse, HttpServer, Responder};

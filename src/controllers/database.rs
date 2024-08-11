@@ -1,5 +1,7 @@
+use crate::controllers::grants::Grants;
 use crate::{Context, Error};
 use chrono::Utc;
+use kube::runtime::events::Recorder;
 use kube::{
     api::{Api, Patch, PatchParams, ResourceExt},
     runtime::{
@@ -13,7 +15,7 @@ use regex::Regex;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use sqlx::Postgres;
+use sqlx::{Pool, Postgres};
 use std::sync::Arc;
 use tokio::time::Duration;
 use tracing::*;
@@ -46,6 +48,9 @@ pub struct DatabaseServerSpec {
     pub create: Option<bool>,
     /// Whether to delete the database when removing the resource.
     pub delete: bool,
+    /// User grants to apply.
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub grants: Vec<Grants>,
 }
 
 /// A reference to a `DatabaseServer`
@@ -151,37 +156,86 @@ impl Database {
                 }
             };
 
+        let database_name = match sanitize_db_name(&self.spec.name) {
+            Ok(name) => name,
+            Err(err) => {
+                recorder
+                    .publish(Event {
+                        type_: EventType::Warning,
+                        reason: "InvalidName".into(),
+                        note: Some(format!("Database name invalid: {err}")),
+                        action: "ReconcileDatabase".into(),
+                        secondary: None,
+                    })
+                    .await
+                    .map_err(Error::KubeError)?;
+
+                return Ok(Action::requeue(Duration::from_secs(5 * 60)));
+            }
+        };
+
+        let mut created = false;
         if let Some(status) = &self.status {
             if status.processed && exists {
-                // TODO: Check if the database still exists and recreate it if it doesn't.
-                return Ok(Action::requeue(Duration::from_secs(5 * 60)));
+                created = true;
+            } else {
+                let should_create = self.spec.create.unwrap_or(true);
+                if !self.was_created() && should_create {
+                    // send an event once per hide
+                    recorder
+                        .publish(Event {
+                            type_: EventType::Normal,
+                            reason: "CreateRequested".into(),
+                            note: Some(String::from("Creating database")),
+                            action: "CreateDatabase".into(),
+                            secondary: None,
+                        })
+                        .await
+                        .map_err(Error::KubeError)?;
+
+                    info!("Attempting to create database {}", self.spec.name);
+                    created = self.create_database(&recorder, pool, &database_name).await?;
+                }
             }
         }
 
-        let should_create = self.spec.create.unwrap_or(true);
-        let created = if !self.was_created() && should_create {
-            // send an event once per hide
-            recorder
-                .publish(Event {
-                    type_: EventType::Normal,
-                    reason: "CreateRequested".into(),
-                    note: Some(String::from("Creating database")),
-                    action: "CreateDatabase".into(),
-                    secondary: None,
-                })
+        // Update the database comment.
+        if let Some(comment) = &self.spec.comment {
+            match sqlx::query::<Postgres>(&format!("COMMENT ON DATABASE \"{database_name}\" IS $1;"))
+                .bind(comment)
+                .execute(pool)
                 .await
-                .map_err(Error::KubeError)?;
+            {
+                Ok(_result) => {
+                    debug!("Set comment on database");
+                }
+                Err(err) => {
+                    warn!("Failed to set comment on database {database_name}: {err}");
+                    recorder
+                        .publish(Event {
+                            type_: EventType::Normal,
+                            reason: "CommentFailed".into(),
+                            note: Some(format!("Failed to apply comment to database: {err}")),
+                            action: "CommentDatabase".into(),
+                            secondary: None,
+                        })
+                        .await
+                        .map_err(Error::KubeError)?;
+                }
+            }
+        }
 
-            info!("Attempting to create database {}", self.spec.name);
-            let database_name = match sanitize_db_name(&self.spec.name) {
+        // Go through all grants.
+        for user_grant in &self.spec.grants {
+            let user_name = match sanitize_user_name(&user_grant.user) {
                 Ok(name) => name,
                 Err(err) => {
                     recorder
                         .publish(Event {
                             type_: EventType::Warning,
                             reason: "InvalidName".into(),
-                            note: Some(format!("Database name invalid: {err}")),
-                            action: "CreateDatabase".into(),
+                            note: Some(format!("User name invalid: {err}")),
+                            action: "ReconcileDatabase".into(),
                             secondary: None,
                         })
                         .await
@@ -191,6 +245,103 @@ impl Database {
                 }
             };
 
+            if let Some(db_grant) = &user_grant.database {
+                for privilege in &db_grant.grants {
+                    let privilege = privilege.to_sql();
+                    match sqlx::query::<Postgres>(&format!(
+                        "GRANT {privilege} ON \"{database_name}\" TO \"{user_name}\";"
+                    ))
+                    .execute(pool)
+                    .await
+                    {
+                        Ok(_result) => {
+                            debug!(
+                                "Set privilege {privilege} on {database_name} to {}",
+                                user_grant.user
+                            );
+                            recorder
+                                .publish(Event {
+                                    type_: EventType::Normal,
+                                    reason: "Success".into(),
+                                    note: Some(format!(
+                                        "Applied privilege {privilege} on database {database_name} to {}",
+                                        user_grant.user
+                                    )),
+                                    action: "ApplyGrant".into(),
+                                    secondary: None,
+                                })
+                                .await
+                                .map_err(Error::KubeError)?;
+                        }
+                        Err(err) => {
+                            warn!("Failed to set comment on database {database_name}: {err}");
+                            recorder
+                                .publish(Event {
+                                    type_: EventType::Warning,
+                                    reason: "GrantFailed".into(),
+                                    note: Some(format!("Failed to apply privilege {privilege} on database {database_name} to {}: {err}", user_grant.user)),
+                                    action: "ApplyGrant".into(),
+                                    secondary: None,
+                                })
+                                .await
+                                .map_err(Error::KubeError)?;
+                        }
+                    }
+                }
+            }
+
+            // TODO: To correctly apply the schema permissions, we'd have to switch to this database.
+            //       This assumes that our user has permissions to connect to the newly-created database.
+            //       We could try to temporarily give us the necessary permission, but it might still be forbidden.
+            if let Some(schema_grant) = &user_grant.schema {
+                for privilege in &schema_grant.grants {
+                    let privilege = privilege.to_sql();
+                    info!(
+                        "The following operation is currently not supported: GRANT {privilege} ON SCHEMA \"{database_name}\" TO {};", user_grant.user
+                    );
+                }
+            }
+
+            // TODO: To correctly apply the table permissions, we'd have to switch to this database.
+            //       This assumes that our user has permissions to connect to the newly-created database.
+            //       We could try to temporarily give us the necessary permission, but it might still be forbidden.
+            if let Some(table_grant) = &user_grant.table {
+                for privilege in &table_grant.grants {
+                    let privilege = privilege.to_sql();
+                    let schema = table_grant.schema.to_owned().unwrap_or(String::from("public"));
+                    info!(
+                        "The following operation is currently not supported: GRANT {privilege} ON TABLE {schema}.{database_name} TO {};", user_grant.user
+                    );
+                }
+            }
+        }
+
+        // always overwrite status object with what we saw
+        let new_status = Patch::Apply(json!({
+            "apiVersion": "db-operator.widemeadows.de/v1",
+            "kind": "Database",
+            "status": DatabaseStatus {
+                processed: true,
+                created
+            }
+        }));
+        let ps = PatchParams::apply("cntrlr").force();
+        let _o = dbs
+            .patch_status(&name, &ps, &new_status)
+            .await
+            .map_err(Error::KubeError)?;
+
+        // If no events were received, check back every 5 minutes
+        Ok(Action::requeue(Duration::from_secs(5 * 60)))
+    }
+
+    async fn create_database(
+        &self,
+        recorder: &Recorder,
+        pool: &Pool<Postgres>,
+        database_name: &String,
+    ) -> Result<bool, Error> {
+        Ok(
             match sqlx::query::<Postgres>(&format!("CREATE DATABASE \"{database_name}\";"))
                 .execute(pool)
                 .await
@@ -242,28 +393,8 @@ impl Database {
                         false
                     }
                 }
-            }
-        } else {
-            false
-        };
-
-        // always overwrite status object with what we saw
-        let new_status = Patch::Apply(json!({
-            "apiVersion": "db-operator.widemeadows.de/v1",
-            "kind": "Database",
-            "status": DatabaseStatus {
-                processed: true,
-                created
-            }
-        }));
-        let ps = PatchParams::apply("cntrlr").force();
-        let _o = dbs
-            .patch_status(&name, &ps, &new_status)
-            .await
-            .map_err(Error::KubeError)?;
-
-        // If no events were received, check back every 5 minutes
-        Ok(Action::requeue(Duration::from_secs(5 * 60)))
+            },
+        )
     }
 
     // Finalizer cleanup (the object was deleted, ensure nothing is orphaned)
@@ -416,6 +547,23 @@ fn sanitize_db_name(name: &str) -> Result<String, String> {
     }
 
     // Add additional checks for reserved words if necessary
+    Ok(name.to_string())
+}
 
+fn sanitize_user_name(name: &str) -> Result<String, String> {
+    // Regex to match valid database names (alphanumeric and underscores)
+    let re = Regex::new(r"^[a-zA-Z0-9_]+$").expect("Invalid regex");
+
+    // Check if the name is valid
+    if !re.is_match(name) {
+        return Err("Invalid user name: Only alphanumeric characters and underscores are allowed.".into());
+    }
+
+    // Check length constraint (assuming PostgreSQL's limit of 63 characters)
+    if name.len() > 63 {
+        return Err("Invalid user name: Name must be 63 characters or fewer.".into());
+    }
+
+    // Add additional checks for reserved words if necessary
     Ok(name.to_string())
 }

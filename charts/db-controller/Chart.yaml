@@ -1,5 +1,5 @@
 apiVersion: v2
-name: db-controller
+name: db-operator
 description: Database controller sample chart
 type: application
 version: 0.1.0

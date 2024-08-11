@@ -22,7 +22,7 @@ jobs:
         uses: docker/metadata-action@v4
         id: meta
         with:
-          images: sunsided/db-controller
+          images: sunsided/db-operator
           tags: |
             type=pep440,pattern={{version}}
             type=raw,value=latest,enable={{is_default_branch}}
@@ -94,7 +94,7 @@ jobs:
         uses: docker/metadata-action@v4
         id: meta
         with:
-          images: sunsided/db-controller
+          images: sunsided/db-operator
           tags: |
             type=pep440,pattern={{version}},prefix=otel-
             type=raw,value=otel,enable={{is_default_branch}}
@@ -161,17 +161,17 @@ jobs:
       - name: helm template | kubctl apply
         run: |
           apiserver="$(kubectl get endpoints kubernetes -ojson | jq '.subsets[0].addresses[0].ip' -r)"
-          helm template charts/db-controller \
+          helm template charts/db-operator \
             --set version=latest \
             --set networkPolicy.enabled=true \
             --set networkPolicy.apiserver.0=${apiserver}/32 \
             | kubectl apply -f -
-      - run: kubectl wait --for=condition=available deploy/db-controller --timeout=30s
+      - run: kubectl wait --for=condition=available deploy/db-operator --timeout=30s
       - run: kubectl apply -f yaml/instance-samuel.yaml
       - run: sleep 2 # TODO: add condition on status and wait for it instead
       # verify reconcile actions have happened
-      - run: kubectl get netpol db-controller -oyaml
-      - run: kubectl logs deploy/db-controller
+      - run: kubectl get netpol db-operator -oyaml
+      - run: kubectl logs deploy/db-operator
       - run: kubectl get event --field-selector "involvedObject.kind=Document,involvedObject.name=samuel" | grep "HideRequested"
       - run: kubectl get doc -oyaml | grep -A1 finalizers | grep documents.kube.rs
 
@@ -229,7 +229,7 @@ jobs:
       - name: Generate crd.yaml
         run: cargo run --bin crdgen > yaml/crd.yaml
       - name: Generate deployment.yaml
-        run: helm template charts/db-controller > yaml/deployment.yaml
+        run: helm template charts/db-operator > yaml/deployment.yaml
       - name: Ensure generated output is committed
         run: |
           if ! git diff --exit-code yaml/; then

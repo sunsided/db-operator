@@ -1,13 +1,14 @@
 ## db-operator
 
 [![ci](https://github.com/kube-rs/controller-rs/actions/workflows/ci.yml/badge.svg)](https://github.com/kube-rs/controller-rs/actions/workflows/ci.yml)
-[![docker image](https://img.shields.io/docker/pulls/sunsided/db-controller.svg)](
-https://hub.docker.com/r/sunsided/db-controller/tags/)
 
-A Rust Kubernetes operator for database management, with observability instrumentation.
+A Rust Kubernetes operator for PostgreSQL database management, with observability instrumentation.
+This operator concerns itself with managing databases and user grants to databases only; it is not aiming
+at being the next [SchemaHero](https://schemahero.io/)
+or [postgres-operator](https://github.com/CrunchyData/postgres-operator).
 
-The `Controller` object reconciles `Document` instances when changes to it are detected, writes to its `.status` object,
-creates associated events, and uses finalizers for guaranteed delete handling.
+The `Controller` object reconciles `DatabaseServer` and `Database` instances when changes to them are detected, and
+optionally creates and deletes databases in the referenced servers.
 
 ## Installation
 
@@ -24,9 +25,9 @@ cargo run --bin crdgen | kubectl apply -f -
 Install the controller via `helm` by setting your preferred settings. For defaults:
 
 ```sh
-helm template charts/db-controller | kubectl apply -f -
-kubectl wait --for=condition=available deploy/db-controller --timeout=30s
-kubectl port-forward service/db-controller 8080:80
+helm template charts/db-operator | kubectl apply -f -
+kubectl wait --for=condition=available deploy/db-operator --timeout=30s
+kubectl port-forward service/db-operator 8080:80
 ```
 
 ### OpenTelemetry
@@ -34,7 +35,7 @@ kubectl port-forward service/db-controller 8080:80
 Build and run with `telemetry` feature, or configure it via `helm`:
 
 ```sh
-helm template charts/db-controller --set tracing.enabled=true | kubectl apply -f -
+helm template charts/db-operator --set tracing.enabled=true | kubectl apply -f -
 ```
 
 This requires an OpenTelemetry collector in your
@@ -43,7 +44,7 @@ should all work out of the box. If your collector does not support grpc otlp you
 `telemetry.rs`](./src/telemetry.rs).
 
 Note that
-the [images are pushed either with or without the telemetry feature](https://hub.docker.com/r/sunsided/db-controller/tags/)
+the [images are pushed either with or without the telemetry feature](https://hub.docker.com/r/sunsided/db-operator/tags/)
 depending on whether the tag includes `otel`.
 
 ### Metrics
@@ -51,7 +52,7 @@ depending on whether the tag includes `otel`.
 Metrics is available on `/metrics` and a `ServiceMonitor` is configurable from the chart:
 
 ```sh
-helm template charts/db-controller --set serviceMonitor.enabled=true | kubectl apply -f -
+helm template charts/db-operator --set serviceMonitor.enabled=true | kubectl apply -f -
 ```
 
 ## Running
@@ -70,7 +71,7 @@ OPENTELEMETRY_ENDPOINT_URL=https://0.0.0.0:55680 RUST_LOG=info,kube=trace,contro
 
 ### In-cluster
 
-For prebuilt, edit the [chart values](./charts/db-controller/values.yaml) or [snapshotted yaml](./yaml/deployment.yaml)
+For prebuilt, edit the [chart values](./charts/db-operator/values.yaml) or [snapshotted yaml](./yaml/deployment.yaml)
 and apply as you see fit (like above).
 
 To develop by building and deploying the image quickly, we recommend using [tilt](https://tilt.dev/), via `tilt up`

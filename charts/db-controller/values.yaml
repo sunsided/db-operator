@@ -4,7 +4,7 @@ namespace: "default"
 version: "" # pin a specific version
 
 image:
-  repository: sunsided/db-controller
+  repository: sunsided/db-operator
   pullPolicy: IfNotPresent
 
 imagePullSecrets: [ ]
@@ -15,14 +15,15 @@ serviceAccount:
 podAnnotations: { }
 
 podSecurityContext: { }
-# fsGroup: 2000
-securityContext: { }
-  # capabilities:
-  #   drop:
-  #   - ALL
-  # readOnlyRootFilesystem: true
-  # runAsNonRoot: true
-# runAsUser: 1000
+# fsGroup: 200
+securityContext:
+  capabilities:
+    drop:
+      - ALL
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  runAsUser: 10001
+  runAsGroup: 10001
 
 # Configure the gRPC opentelemetry push url
 tracing:

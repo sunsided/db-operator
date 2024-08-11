@@ -29,30 +29,31 @@ spec:
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
       containers:
-      - name: {{ .Chart.Name }}
-        image: {{ .Values.image.repository }}:{{ include "controller.tag" . }}
-        imagePullPolicy: {{ .Values.image.pullPolicy }}
-        securityContext:
+        - name: {{ .Chart.Name }}
+          image: {{ .Values.image.repository }}:{{ include "controller.tag" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
           {{- toYaml .Values.securityContext | nindent 10 }}
-        resources:
+          resources:
           {{- toYaml .Values.resources | nindent 10 }}
-        ports:
-        - name: http
-          containerPort: 8080
-          protocol: TCP
-        env:
-        - name: RUST_LOG
-          value: {{ .Values.logging.env_filter }}
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          env:
+            - name: RUST_LOG
+              value: {{ .Values.logging.env_filter }}
         {{- if .Values.tracing.enabled }}
-        - name: OPENTELEMETRY_ENDPOINT_URL
-          value: http://{{ .Values.tracing.service }}.{{ .Values.tracing.namespace }}.svc:{{ .Values.tracing.port }}
+            - name: OPENTELEMETRY_ENDPOINT_URL
+              value:
+                http://{{ .Values.tracing.service }}.{{ .Values.tracing.namespace }}.svc: {{ .Values.tracing.port }}
         {{- end }}
         {{- with .Values.env }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
-        readinessProbe:
-          httpGet:
-            path: /health
-            port: http
-          initialDelaySeconds: 5
-          periodSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5

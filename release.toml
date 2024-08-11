@@ -10,7 +10,7 @@
 # https://github.com/crate-ci/cargo-release/blob/master/docs/reference.md
 
 pre-release-replacements = [
-    { file = "charts/db-controller/Chart.yaml", search = "appVersion: .*", replace = "appVersion: {{version}}" },
+    { file = "charts/db-operator/Chart.yaml", search = "appVersion: .*", replace = "appVersion: {{version}}" },
 ]
 pre-release-commit-message = "release {{version}}"
 push = false

@@ -1,3 +1,10 @@
+//! # db-operator - core code
+//!
+//! This crate contains the controller logic sans the API code. For API code, see
+//! [`main.rs`](main.rs).
+
+#![forbid(unsafe_code)]
+
 use thiserror::Error;
 
 /// Expose all controller components used by main
@@ -131,7 +138,7 @@ impl Default for Diagnostics {
     fn default() -> Self {
         Self {
             last_event: Utc::now(),
-            reporter: "db-controller".into(),
+            reporter: "db-operator".into(),
         }
     }
 }

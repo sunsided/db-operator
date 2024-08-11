@@ -8,7 +8,8 @@ install-crd: generate
 
 generate:
   cargo run --bin crdgen > yaml/crd.yaml
-  helm template charts/db-controller > yaml/deployment.yaml
+  helm template charts/db-operator > yaml/deployment.yaml
+  cp yaml/crd.yaml charts/db-operator/templates/crd.yaml
 
 sqlx:
   cargo sqlx prepare
@@ -52,7 +53,15 @@ compile features="":
 [private]
 _build features="":
   just compile {{features}}
-  docker build -t sunsided/db-controller:local .
+  docker build -t ghcr.io/sunsided/db-operator:local .
+
+[private]
+tag-latest:
+  docker tag ghcr.io/sunsided/db-operator:local ghcr.io/sunsided/db-operator:latest
+
+[private]
+push-latest:
+  docker tag ghcr.io/sunsided/db-operator:local ghcr.io/sunsided/db-operator:latest
 
 # docker build base
 build-base: (_build "")

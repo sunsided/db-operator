@@ -1,5 +1,5 @@
 image:
-  repository: sunsided/db-controller
+  repository: sunsided/db-operator
   pullPolicy: Always
   tag: "latest"
 namespace: default
