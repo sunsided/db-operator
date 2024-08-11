@@ -38,7 +38,7 @@ spec:
                 description: The password of the administrative user.
                 type: string
               user:
-                description: The user name of the administrative user.
+                description: The username of the administrative user.
                 type: string
             required:
             - enable
@@ -55,6 +55,10 @@ spec:
                 type: boolean
               enabled:
                 type: boolean
+              server_version:
+                description: The server version
+                nullable: true
+                type: string
             required:
             - connected
             - enabled

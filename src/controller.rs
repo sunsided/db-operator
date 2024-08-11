@@ -54,6 +54,8 @@ pub struct DatabaseServerStatus {
     pub enabled: bool,
     /// Whether a connection attempt was successful.
     pub connected: bool,
+    /// The server version
+    pub server_version: Option<String>,
 }
 
 impl DatabaseServer {
@@ -119,7 +121,7 @@ impl DatabaseServer {
                 .publish(Event {
                     type_: EventType::Normal,
                     reason: "EnableRequested".into(),
-                    note: Some(format!("Enabling `{name}`")),
+                    note: Some(String::from("Enabling database server use")),
                     action: "Enabling".into(),
                     secondary: None,
                 })
@@ -128,6 +130,7 @@ impl DatabaseServer {
         }
 
         // Connect to the database ensure validity of configuration.
+        let mut server_version = None;
         let connect_options = PgConnectOptions::new()
             .host(&self.spec.host)
             .username(&self.spec.user)
@@ -139,13 +142,22 @@ impl DatabaseServer {
             .connect_with(connect_options)
             .await
         {
-            Ok(_pool) => {
+            Ok(pool) => {
+                server_version = match sqlx::query!("SELECT version();").fetch_one(&pool).await {
+                    Ok(row) => Some(row.version.unwrap_or(String::from("unknown"))),
+                    Err(_) => None,
+                };
+
                 if !self.was_connected() {
                     recorder
                         .publish(Event {
                             type_: EventType::Normal,
                             reason: "Connected".into(),
-                            note: Some(format!("Successfully connected to `{}`", self.spec.host)),
+                            note: Some(format!(
+                                "Successfully connected to host `{}`: {}",
+                                self.spec.host,
+                                server_version.to_owned().unwrap_or(String::from("unknown"))
+                            )),
                             action: "Connect".into(),
                             secondary: None,
                         })
@@ -183,7 +195,8 @@ impl DatabaseServer {
             "kind": "DatabaseServer",
             "status": DatabaseServerStatus {
                 enabled: should_enable,
-                connected: is_connected
+                connected: is_connected,
+                server_version
             }
         }));
         let ps = PatchParams::apply("cntrlr").force();

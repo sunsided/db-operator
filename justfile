@@ -10,6 +10,12 @@ generate:
   cargo run --bin crdgen > yaml/crd.yaml
   helm template charts/db-controller > yaml/deployment.yaml
 
+sqlx:
+  cargo sqlx prepare
+
+sqlx-check:
+  cargo sqlx prepare --check
+
 # run with opentelemetry
 run-telemetry:
   OPENTELEMETRY_ENDPOINT_URL=http://127.0.0.1:55680 RUST_LOG=info,kube=trace,controller=debug cargo run --features=telemetry
