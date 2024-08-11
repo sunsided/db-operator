@@ -4,25 +4,25 @@ namespace: "default"
 version: "" # pin a specific version
 
 image:
-  repository: clux/controller
+  repository: sunsided/db-controller
   pullPolicy: IfNotPresent
 
-imagePullSecrets: []
+imagePullSecrets: [ ]
 
 serviceAccount:
   create: true
-  annotations: {}
-podAnnotations: {}
+  annotations: { }
+podAnnotations: { }
 
-podSecurityContext: {}
-  # fsGroup: 2000
-securityContext: {}
+podSecurityContext: { }
+# fsGroup: 2000
+securityContext: { }
   # capabilities:
   #   drop:
   #   - ALL
   # readOnlyRootFilesystem: true
   # runAsNonRoot: true
-  # runAsUser: 1000
+# runAsUser: 1000
 
 # Configure the gRPC opentelemetry push url
 tracing:
@@ -40,7 +40,7 @@ networkPolicy:
   dns: true
   # apiserver access: please scope; take addresses from "kubectl get endpoints kubernetes -n default"
   apiserver:
-  - "0.0.0.0/0" # extremely wide-open egress on ports 443 + 6443
+    - "0.0.0.0/0" # extremely wide-open egress on ports 443 + 6443
   prometheus:
     enabled: true
     namespace: monitoring
@@ -50,7 +50,7 @@ networkPolicy:
 logging:
   env_filter: info,kube=debug,controller=debug
 
-env: []
+env: [ ]
 
 service:
   type: ClusterIP

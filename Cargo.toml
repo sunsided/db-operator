@@ -22,7 +22,7 @@ name = "controller"
 path = "src/lib.rs"
 
 [features]
-default = ["telemetry"]
+default = []
 telemetry = ["tonic", "opentelemetry-otlp"]
 
 [dependencies]

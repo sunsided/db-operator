@@ -22,7 +22,7 @@ jobs:
         uses: docker/metadata-action@v4
         id: meta
         with:
-          images: clux/controller
+          images: sunsided/db-controller
           tags: |
             type=pep440,pattern={{version}}
             type=raw,value=latest,enable={{is_default_branch}}
@@ -94,7 +94,7 @@ jobs:
         uses: docker/metadata-action@v4
         id: meta
         with:
-          images: clux/controller
+          images: sunsided/db-controller
           tags: |
             type=pep440,pattern={{version}},prefix=otel-
             type=raw,value=otel,enable={{is_default_branch}}

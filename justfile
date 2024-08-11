@@ -46,7 +46,7 @@ compile features="":
 [private]
 _build features="":
   just compile {{features}}
-  docker build -t clux/controller:local .
+  docker build -t sunsided/db-controller:local .
 
 # docker build base
 build-base: (_build "")

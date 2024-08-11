@@ -30,7 +30,7 @@ async fn index(c: Data<State>, _req: HttpRequest) -> impl Responder {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     dotenvy::dotenv().ok();
-    init_logging();
+    // init_logging();
     telemetry::init().await;
 
     // Initialize Kubernetes controller state
@@ -54,6 +54,7 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
+#[allow(dead_code)]
 fn init_logging() {
     let log_level = env::var("RUST_LOG").unwrap_or_else(|_| "info".to_string());
     Builder::with_level("info")

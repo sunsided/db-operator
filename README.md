@@ -1,8 +1,8 @@
 ## db-operator
 
 [![ci](https://github.com/kube-rs/controller-rs/actions/workflows/ci.yml/badge.svg)](https://github.com/kube-rs/controller-rs/actions/workflows/ci.yml)
-[![docker image](https://img.shields.io/docker/pulls/clux/controller.svg)](
-https://hub.docker.com/r/clux/controller/tags/)
+[![docker image](https://img.shields.io/docker/pulls/sunsided/db-controller.svg)](
+https://hub.docker.com/r/sunsided/db-controller/tags/)
 
 A Rust Kubernetes operator for database management, with observability instrumentation.
 
@@ -43,7 +43,7 @@ should all work out of the box. If your collector does not support grpc otlp you
 `telemetry.rs`](./src/telemetry.rs).
 
 Note that
-the [images are pushed either with or without the telemetry feature](https://hub.docker.com/r/clux/controller/tags/)
+the [images are pushed either with or without the telemetry feature](https://hub.docker.com/r/sunsided/db-controller/tags/)
 depending on whether the tag includes `otel`.
 
 ### Metrics

@@ -1,5 +1,5 @@
 image:
-  repository: clux/controller
+  repository: sunsided/db-controller
   pullPolicy: Always
   tag: "latest"
 namespace: default

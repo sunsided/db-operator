@@ -1,18 +1,18 @@
 ---
-# Source: doc-controller/templates/networkpolicy.yaml
+# Source: db-controller/templates/networkpolicy.yaml
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: doc-controller
+  name: db-controller
   namespace: default
   labels:
-    app: doc-controller
-    app.kubernetes.io/name: doc-controller
-    app.kubernetes.io/version: "0.12.12"
+    app: db-controller
+    app.kubernetes.io/name: db-controller
+    app.kubernetes.io/version: "0.1.0"
 spec:
   podSelector:
     matchLabels:
-      app: doc-controller
+      app: db-controller
   policyTypes:
   - Ingress
   - Egress
@@ -49,25 +49,25 @@ spec:
     - port: http
       protocol: TCP
 ---
-# Source: doc-controller/templates/rbac.yaml
+# Source: db-controller/templates/rbac.yaml
 # Scoped service account
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: doc-controller
+  name: db-controller
   labels:
-    app: doc-controller
-    app.kubernetes.io/name: doc-controller
-    app.kubernetes.io/version: "0.12.12"
+    app: db-controller
+    app.kubernetes.io/name: db-controller
+    app.kubernetes.io/version: "0.1.0"
   namespace: default
 automountServiceAccountToken: true
 ---
-# Source: doc-controller/templates/rbac.yaml
+# Source: db-controller/templates/rbac.yaml
 # Access for the service account
 kind: ClusterRole
 apiVersion: rbac.authorization.k8s.io/v1
 metadata:
-  name: doc-controller
+  name: db-controller
 rules:
   - apiGroups: ["kube.rs"]
     resources: ["documents", "documents/status", "documents/finalizers"]
@@ -76,32 +76,32 @@ rules:
     resources: ["events"]
     verbs: ["create"]
 ---
-# Source: doc-controller/templates/rbac.yaml
+# Source: db-controller/templates/rbac.yaml
 # Binding the role to the account
 kind: ClusterRoleBinding
 apiVersion: rbac.authorization.k8s.io/v1
 metadata:
-  name: doc-controller
+  name: db-controller
 subjects:
 - kind: ServiceAccount
   namespace: default
-  name: doc-controller
+  name: db-controller
 roleRef:
   kind: ClusterRole
-  name: doc-controller
+  name: db-controller
   apiGroup: rbac.authorization.k8s.io
 ---
-# Source: doc-controller/templates/service.yaml
+# Source: db-controller/templates/service.yaml
 # Expose the http port of the service
 apiVersion: v1
 kind: Service
 metadata:
-  name: doc-controller
+  name: db-controller
   namespace: default
   labels:
-    app: doc-controller
-    app.kubernetes.io/name: doc-controller
-    app.kubernetes.io/version: "0.12.12"
+    app: db-controller
+    app.kubernetes.io/name: db-controller
+    app.kubernetes.io/version: "0.1.0"
 spec:
   type: ClusterIP
   ports:
@@ -110,36 +110,36 @@ spec:
     protocol: TCP
     name: http
   selector:
-    app: doc-controller
+    app: db-controller
 ---
-# Source: doc-controller/templates/deployment.yaml
+# Source: db-controller/templates/deployment.yaml
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: doc-controller
+  name: db-controller
   namespace: default
   labels:
-    app: doc-controller
-    app.kubernetes.io/name: doc-controller
-    app.kubernetes.io/version: "0.12.12"
+    app: db-controller
+    app.kubernetes.io/name: db-controller
+    app.kubernetes.io/version: "0.1.0"
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: doc-controller
+      app: db-controller
   template:
     metadata:
       labels:
-        app: doc-controller
+        app: db-controller
       annotations:
-        kubectl.kubernetes.io/default-container: doc-controller
+        kubectl.kubernetes.io/default-container: db-controller
     spec:
-      serviceAccountName: doc-controller
+      serviceAccountName: db-controller
       securityContext:
         {}
       containers:
-      - name: doc-controller
-        image: clux/controller:0.12.12
+      - name: db-controller
+        image: sunsided/db-controller:0.1.0
         imagePullPolicy: IfNotPresent
         securityContext:
           {}
