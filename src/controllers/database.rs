@@ -42,8 +42,6 @@ pub struct DatabaseServerSpec {
     pub server_ref: DatabaseServerRef,
     /// The name of the database to create.
     pub name: String,
-    /// The optional comment to add to the database.
-    pub comment: Option<String>,
     /// Whether to create the database when reconciling the resource.
     pub create: Option<bool>,
     /// Whether to delete the database when removing the resource.
@@ -195,32 +193,6 @@ impl Database {
 
                     info!("Attempting to create database {}", self.spec.name);
                     created = self.create_database(&recorder, pool, &database_name).await?;
-                }
-            }
-        }
-
-        // Update the database comment.
-        if let Some(comment) = &self.spec.comment {
-            match sqlx::query::<Postgres>(&format!("COMMENT ON DATABASE \"{database_name}\" IS $1;"))
-                .bind(comment)
-                .execute(pool)
-                .await
-            {
-                Ok(_result) => {
-                    debug!("Set comment on database");
-                }
-                Err(err) => {
-                    warn!("Failed to set comment on database {database_name}: {err}");
-                    recorder
-                        .publish(Event {
-                            type_: EventType::Normal,
-                            reason: "CommentFailed".into(),
-                            note: Some(format!("Failed to apply comment to database: {err}")),
-                            action: "CommentDatabase".into(),
-                            secondary: None,
-                        })
-                        .await
-                        .map_err(Error::KubeError)?;
                 }
             }
         }

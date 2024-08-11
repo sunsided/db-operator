@@ -14,40 +14,40 @@ spec:
     matchLabels:
       app: db-operator
   policyTypes:
-    - Ingress
-    - Egress
+  - Ingress
+  - Egress
   egress:
 
-    # Kubernetes apiserver access
-    - to:
-        - ipBlock:
-            cidr: 0.0.0.0/0
-      ports:
-        - port: 443
-          protocol: TCP
-        - port: 6443
-          protocol: TCP
-    # DNS egress
-    - to:
-        - podSelector:
-            matchLabels:
-              k8s-app: kube-dns
-      ports:
-        - port: 53
-          protocol: UDP
+  # Kubernetes apiserver access
+  - to:
+    - ipBlock:
+        cidr: 0.0.0.0/0
+    ports:
+    - port: 443
+      protocol: TCP
+    - port: 6443
+      protocol: TCP
+  # DNS egress
+  - to:
+    - podSelector:
+        matchLabels:
+          k8s-app: kube-dns
+    ports:
+    - port: 53
+      protocol: UDP
 
   ingress:
-    # prometheus metrics scraping support
-    - from:
-        - namespaceSelector:
-            matchLabels:
-              name: monitoring
-          podSelector:
-            matchLabels:
-              app: prometheus
-      ports:
-        - port: http
-          protocol: TCP
+  # prometheus metrics scraping support
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: monitoring
+      podSelector:
+        matchLabels:
+          app: prometheus
+    ports:
+    - port: http
+      protocol: TCP
 ---
 # Source: db-operator/templates/rbac.yaml
 # Scoped service account
@@ -70,189 +70,189 @@ metadata:
 spec:
   group: db-operator.widemeadows.de
   names:
-    categories: [ ]
+    categories: []
     kind: DatabaseServer
     plural: databaseservers
     shortNames:
-      - dbservers
+    - dbservers
     singular: databaseserver
   scope: Namespaced
   versions:
-    - additionalPrinterColumns: [ ]
-      name: v1
-      schema:
-        openAPIV3Schema:
-          description: Auto-generated derived type for DatabaseServerSpec via `CustomResource`
-          properties:
-            spec:
-              description: |-
-                Generate the Kubernetes wrapper struct `DatabaseServer` from our Spec and Status struct
-                
-                This provides a hook for generating the CRD yaml (in crdgen.rs)
-              properties:
-                connection:
-                  description: Database connection details.
-                  oneOf:
-                    - required:
-                        - url
-                    - required:
-                        - details
-                  properties:
-                    details:
-                      properties:
-                        dbname:
-                          description: The database to connect to for the administrative user; defaults to `postgres`.
-                          nullable: true
-                          oneOf:
-                            - required:
-                                - value
-                            - required:
-                                - secretRef
-                          properties:
-                            secretRef:
-                              properties:
-                                key:
-                                  description: The key of the connection string URL in the secret.
-                                  type: string
-                                name:
-                                  description: The name of the secret.
-                                  type: string
-                              required:
-                                - key
-                                - name
-                              type: object
-                            value:
-                              type: string
-                          type: object
-                        host:
-                          description: The host to connect to.
-                          oneOf:
-                            - required:
-                                - value
-                            - required:
-                                - secretRef
-                          properties:
-                            secretRef:
-                              properties:
-                                key:
-                                  description: The key of the connection string URL in the secret.
-                                  type: string
-                                name:
-                                  description: The name of the secret.
-                                  type: string
-                              required:
-                                - key
-                                - name
-                              type: object
-                            value:
-                              type: string
-                          type: object
-                        password:
-                          description: The password of the administrative user.
-                          oneOf:
-                            - required:
-                                - value
-                            - required:
-                                - secretRef
-                          properties:
-                            secretRef:
-                              properties:
-                                key:
-                                  description: The key of the connection string URL in the secret.
-                                  type: string
-                                name:
-                                  description: The name of the secret.
-                                  type: string
-                              required:
-                                - key
-                                - name
-                              type: object
-                            value:
-                              type: string
-                          type: object
-                        user:
-                          description: The username of the administrative user.
-                          oneOf:
-                            - required:
-                                - value
-                            - required:
-                                - secretRef
-                          properties:
-                            secretRef:
-                              properties:
-                                key:
-                                  description: The key of the connection string URL in the secret.
-                                  type: string
-                                name:
-                                  description: The name of the secret.
-                                  type: string
-                              required:
-                                - key
-                                - name
-                              type: object
-                            value:
-                              type: string
-                          type: object
-                      required:
-                        - host
-                        - password
-                        - user
-                      type: object
-                    url:
-                      description: A literal value.
-                      oneOf:
+  - additionalPrinterColumns: []
+    name: v1
+    schema:
+      openAPIV3Schema:
+        description: Auto-generated derived type for DatabaseServerSpec via `CustomResource`
+        properties:
+          spec:
+            description: |-
+              Generate the Kubernetes wrapper struct `DatabaseServer` from our Spec and Status struct
+
+              This provides a hook for generating the CRD yaml (in crdgen.rs)
+            properties:
+              connection:
+                description: Database connection details.
+                oneOf:
+                - required:
+                  - url
+                - required:
+                  - details
+                properties:
+                  details:
+                    properties:
+                      dbname:
+                        description: The database to connect to for the administrative user; defaults to `postgres`.
+                        nullable: true
+                        oneOf:
                         - required:
-                            - value
+                          - value
                         - required:
-                            - secretRef
-                      properties:
-                        secretRef:
-                          properties:
-                            key:
-                              description: The key of the connection string URL in the secret.
-                              type: string
-                            name:
-                              description: The name of the secret.
-                              type: string
-                          required:
+                          - secretRef
+                        properties:
+                          secretRef:
+                            properties:
+                              key:
+                                description: The key of the connection string URL in the secret.
+                                type: string
+                              name:
+                                description: The name of the secret.
+                                type: string
+                            required:
                             - key
                             - name
-                          type: object
-                        value:
-                          type: string
-                      type: object
-                  type: object
-                enable:
-                  type: boolean
-              required:
-                - connection
-                - enable
-              type: object
-            status:
-              description: The status object of `DatabaseServer`
-              nullable: true
-              properties:
-                connected:
-                  description: Whether a connection attempt was successful.
-                  type: boolean
-                enabled:
-                  type: boolean
-                server_version:
-                  description: The server version
-                  nullable: true
-                  type: string
-              required:
-                - connected
-                - enabled
-              type: object
-          required:
-            - spec
-          title: DatabaseServer
-          type: object
-      served: true
-      storage: true
-      subresources:
-        status: { }
+                            type: object
+                          value:
+                            type: string
+                        type: object
+                      host:
+                        description: The host to connect to.
+                        oneOf:
+                        - required:
+                          - value
+                        - required:
+                          - secretRef
+                        properties:
+                          secretRef:
+                            properties:
+                              key:
+                                description: The key of the connection string URL in the secret.
+                                type: string
+                              name:
+                                description: The name of the secret.
+                                type: string
+                            required:
+                            - key
+                            - name
+                            type: object
+                          value:
+                            type: string
+                        type: object
+                      password:
+                        description: The password of the administrative user.
+                        oneOf:
+                        - required:
+                          - value
+                        - required:
+                          - secretRef
+                        properties:
+                          secretRef:
+                            properties:
+                              key:
+                                description: The key of the connection string URL in the secret.
+                                type: string
+                              name:
+                                description: The name of the secret.
+                                type: string
+                            required:
+                            - key
+                            - name
+                            type: object
+                          value:
+                            type: string
+                        type: object
+                      user:
+                        description: The username of the administrative user.
+                        oneOf:
+                        - required:
+                          - value
+                        - required:
+                          - secretRef
+                        properties:
+                          secretRef:
+                            properties:
+                              key:
+                                description: The key of the connection string URL in the secret.
+                                type: string
+                              name:
+                                description: The name of the secret.
+                                type: string
+                            required:
+                            - key
+                            - name
+                            type: object
+                          value:
+                            type: string
+                        type: object
+                    required:
+                    - host
+                    - password
+                    - user
+                    type: object
+                  url:
+                    description: A literal value.
+                    oneOf:
+                    - required:
+                      - value
+                    - required:
+                      - secretRef
+                    properties:
+                      secretRef:
+                        properties:
+                          key:
+                            description: The key of the connection string URL in the secret.
+                            type: string
+                          name:
+                            description: The name of the secret.
+                            type: string
+                        required:
+                        - key
+                        - name
+                        type: object
+                      value:
+                        type: string
+                    type: object
+                type: object
+              enable:
+                type: boolean
+            required:
+            - connection
+            - enable
+            type: object
+          status:
+            description: The status object of `DatabaseServer`
+            nullable: true
+            properties:
+              connected:
+                description: Whether a connection attempt was successful.
+                type: boolean
+              enabled:
+                type: boolean
+              server_version:
+                description: The server version
+                nullable: true
+                type: string
+            required:
+            - connected
+            - enabled
+            type: object
+        required:
+        - spec
+        title: DatabaseServer
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
 ---
 # Source: db-operator/templates/crd.yaml
 apiVersion: apiextensions.k8s.io/v1
@@ -262,146 +262,146 @@ metadata:
 spec:
   group: db-operator.widemeadows.de
   names:
-    categories: [ ]
+    categories: []
     kind: Database
     plural: databases
     shortNames:
-      - db
+    - db
     singular: database
   scope: Namespaced
   versions:
-    - additionalPrinterColumns: [ ]
-      name: v1
-      schema:
-        openAPIV3Schema:
-          description: Auto-generated derived type for DatabaseServerSpec via `CustomResource`
-          properties:
-            spec:
-              description: |-
-                Generate the Kubernetes wrapper struct `Database` from our Spec and Status struct
-                
-                This provides a hook for generating the CRD yaml (in crdgen.rs)
-              properties:
-                comment:
-                  description: The optional comment to add to the database.
-                  nullable: true
-                  type: string
-                create:
-                  description: Whether to create the database when reconciling the resource.
-                  nullable: true
-                  type: boolean
-                delete:
-                  description: Whether to delete the database when removing the resource.
-                  type: boolean
-                grants:
-                  description: User grants to apply.
-                  items:
-                    description: A set of grants.
-                    properties:
-                      database:
-                        description: A set of database-specific grants.
-                        nullable: true
-                        properties:
-                          grants:
-                            items:
-                              enum:
-                                - CONNECT
-                                - CREATE
-                                - TEMPORARY
-                                - ALL PRIVILEGES
-                              type: string
-                            type: array
-                        required:
-                          - grants
-                        type: object
-                      name:
-                        description: An optional identifier.
-                        nullable: true
-                        type: string
-                      schema:
-                        description: A set of table-specific grantes.
-                        nullable: true
-                        properties:
-                          grants:
-                            items:
-                              enum:
-                                - USAGE
-                                - CREATE
-                                - ALL PRIVILEGES
-                              type: string
-                            type: array
-                          name:
-                            type: string
-                        required:
-                          - grants
-                          - name
-                        type: object
-                      tables:
-                        description: A set of table-specific grants.
-                        nullable: true
-                        properties:
-                          grants:
-                            items:
-                              enum:
-                                - SELECT
-                                - INSERT
-                                - UPDATE
-                                - DELETE
-                                - TRUNCATE
-                                - REFERENCES
-                                - TRIGGER
-                                - ALL PRVILEGES
-                              type: string
-                            type: array
-                          name:
-                            type: string
-                        required:
-                          - grants
-                          - name
-                        type: object
-                      user:
-                        type: string
-                    required:
-                      - user
-                    type: object
-                  type: array
-                name:
-                  description: The name of the database to create.
-                  type: string
-                serverRef:
-                  description: A reference to the `DatabaseServer` instance to use.
+  - additionalPrinterColumns: []
+    name: v1
+    schema:
+      openAPIV3Schema:
+        description: Auto-generated derived type for DatabaseServerSpec via `CustomResource`
+        properties:
+          spec:
+            description: |-
+              Generate the Kubernetes wrapper struct `Database` from our Spec and Status struct
+
+              This provides a hook for generating the CRD yaml (in crdgen.rs)
+            properties:
+              comment:
+                description: The optional comment to add to the database.
+                nullable: true
+                type: string
+              create:
+                description: Whether to create the database when reconciling the resource.
+                nullable: true
+                type: boolean
+              delete:
+                description: Whether to delete the database when removing the resource.
+                type: boolean
+              grants:
+                description: User grants to apply.
+                items:
+                  description: A set of grants.
                   properties:
+                    database:
+                      description: A set of database-specific grants.
+                      nullable: true
+                      properties:
+                        grants:
+                          items:
+                            enum:
+                            - CONNECT
+                            - CREATE
+                            - TEMPORARY
+                            - ALL PRIVILEGES
+                            type: string
+                          type: array
+                      required:
+                      - grants
+                      type: object
                     name:
-                      description: A reference to the `DatabaseServer` instance.
+                      description: An optional identifier.
+                      nullable: true
+                      type: string
+                    schema:
+                      description: A set of table-specific grantes.
+                      nullable: true
+                      properties:
+                        grants:
+                          items:
+                            enum:
+                            - USAGE
+                            - CREATE
+                            - ALL PRIVILEGES
+                            type: string
+                          type: array
+                        name:
+                          type: string
+                      required:
+                      - grants
+                      - name
+                      type: object
+                    tables:
+                      description: A set of table-specific grants.
+                      nullable: true
+                      properties:
+                        grants:
+                          items:
+                            enum:
+                            - SELECT
+                            - INSERT
+                            - UPDATE
+                            - DELETE
+                            - TRUNCATE
+                            - REFERENCES
+                            - TRIGGER
+                            - ALL PRVILEGES
+                            type: string
+                          type: array
+                        name:
+                          type: string
+                      required:
+                      - grants
+                      - name
+                      type: object
+                    user:
                       type: string
                   required:
-                    - name
+                  - user
                   type: object
-              required:
-                - delete
+                type: array
+              name:
+                description: The name of the database to create.
+                type: string
+              serverRef:
+                description: A reference to the `DatabaseServer` instance to use.
+                properties:
+                  name:
+                    description: A reference to the `DatabaseServer` instance.
+                    type: string
+                required:
                 - name
-                - serverRef
-              type: object
-            status:
-              description: The status object of `Database`
-              nullable: true
-              properties:
-                created:
-                  type: boolean
-                processed:
-                  type: boolean
-              required:
-                - created
-                - processed
-              type: object
-          required:
-            - spec
-          title: Database
-          type: object
-      served: true
-      storage: true
-      subresources:
-        status: { }
+                type: object
+            required:
+            - delete
+            - name
+            - serverRef
+            type: object
+          status:
+            description: The status object of `Database`
+            nullable: true
+            properties:
+              created:
+                type: boolean
+              processed:
+                type: boolean
+            required:
+            - created
+            - processed
+            type: object
+        required:
+        - spec
+        title: Database
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
 ---
 # Source: db-operator/templates/rbac.yaml
 # Access for the service account
@@ -484,7 +484,7 @@ spec:
     spec:
       serviceAccountName: db-operator
       securityContext:
-        { }
+        {}
       containers:
         - name: db-operator
           image: sunsided/db-operator:0.1.0
@@ -492,7 +492,7 @@ spec:
           securityContext:
           capabilities:
             drop:
-              - ALL
+            - ALL
           readOnlyRootFilesystem: true
           runAsGroup: 10001
           runAsNonRoot: true
