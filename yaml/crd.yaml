@@ -9,7 +9,7 @@ spec:
     kind: DatabaseServer
     plural: databaseservers
     shortNames:
-    - doc
+    - dbservers
     singular: databaseserver
   scope: Namespaced
   versions:
@@ -201,7 +201,7 @@ spec:
     kind: Database
     plural: databases
     shortNames:
-    - doc
+    - db
     singular: database
   scope: Namespaced
   versions:
@@ -251,8 +251,11 @@ spec:
             properties:
               created:
                 type: boolean
+              processed:
+                type: boolean
             required:
             - created
+            - processed
             type: object
         required:
         - spec

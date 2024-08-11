@@ -49,6 +49,7 @@ dotenvy = "0.15.7"
 env_logger = "0.11.5"
 sqlx = { version = "0.8.0", features = ["postgres", "runtime-tokio-native-tls", "macros"] }
 base64 = "0.22.1"
+regex = "1.10.6"
 
 [dev-dependencies]
 assert-json-diff = "2.0.2"

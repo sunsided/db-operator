@@ -71,7 +71,8 @@ metadata:
 rules:
   # Access to the controller resources.
   - apiGroups: [ "db-operator.widemeadows.de" ]
-    resources: [ "databaseservers", "databaseservers/status", "databaseservers/finalizers" ]
+    resources: [ "databaseservers", "databaseservers/status", "databaseservers/finalizers",
+                 "databases", "databases/status", "databases/finalizers" ]
     verbs: [ "get", "list", "watch", "patch", "update" ]
   # Access to the database connection secrets.
   - apiGroups: [ "" ]

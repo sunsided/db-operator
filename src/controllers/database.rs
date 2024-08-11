@@ -9,6 +9,7 @@ use kube::{
     },
     CustomResource,
 };
+use regex::Regex;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -57,6 +58,7 @@ pub struct DatabaseServerRef {
 /// The status object of `Database`
 #[derive(Deserialize, Serialize, Clone, Default, Debug, JsonSchema)]
 pub struct DatabaseStatus {
+    pub processed: bool,
     pub created: bool,
 }
 
@@ -101,8 +103,63 @@ impl Database {
         let name = self.name_any();
         let dbs: Api<Database> = Api::namespaced(client.clone(), &ns);
 
+        let servers = ctx.servers.read().await;
+        let server_id = &self.spec.server_ref.name;
+        let pool = match servers.get(server_id) {
+            None => {
+                warn!("Unable to look up database server {}", server_id);
+                recorder
+                    .publish(Event {
+                        type_: EventType::Warning,
+                        reason: "MissingServer".into(),
+                        note: Some(format!(
+                            "Unable to create database due to invalid server reference: {}",
+                            self.spec.server_ref.name
+                        )),
+                        action: "CreateDatabase".into(),
+                        secondary: None,
+                    })
+                    .await
+                    .map_err(Error::KubeError)?;
+
+                return Ok(Action::requeue(Duration::from_secs(5 * 60)));
+            }
+            Some(pool) => pool,
+        };
+
+        let exists =
+            match sqlx::query_scalar::<Postgres, i32>("SELECT 1 FROM pg_database WHERE datname = $1;")
+                .bind(&self.spec.name)
+                .fetch_optional(pool)
+                .await
+            {
+                Ok(Some(_value)) => true,
+                Ok(None) => false,
+                Err(err) => {
+                    recorder
+                        .publish(Event {
+                            type_: EventType::Warning,
+                            reason: "InspectionFailed".into(),
+                            note: Some(format!("Failed to test for databases: {err}")),
+                            action: "CreateDatabase".into(),
+                            secondary: None,
+                        })
+                        .await
+                        .map_err(Error::KubeError)?;
+
+                    return Ok(Action::requeue(Duration::from_secs(5 * 60)));
+                }
+            };
+
+        if let Some(status) = &self.status {
+            if status.processed && exists {
+                // TODO: Check if the database still exists and recreate it if it doesn't.
+                return Ok(Action::requeue(Duration::from_secs(5 * 60)));
+            }
+        }
+
         let should_create = self.spec.create.unwrap_or(true);
-        if !self.was_created() && should_create {
+        let created = if !self.was_created() && should_create {
             // send an event once per hide
             recorder
                 .publish(Event {
@@ -114,14 +171,89 @@ impl Database {
                 })
                 .await
                 .map_err(Error::KubeError)?;
-        }
+
+            info!("Attempting to create database {}", self.spec.name);
+            let database_name = match sanitize_db_name(&self.spec.name) {
+                Ok(name) => name,
+                Err(err) => {
+                    recorder
+                        .publish(Event {
+                            type_: EventType::Warning,
+                            reason: "InvalidName".into(),
+                            note: Some(format!("Database name invalid: {err}")),
+                            action: "CreateDatabase".into(),
+                            secondary: None,
+                        })
+                        .await
+                        .map_err(Error::KubeError)?;
+
+                    return Ok(Action::requeue(Duration::from_secs(5 * 60)));
+                }
+            };
+
+            match sqlx::query::<Postgres>(&format!("CREATE DATABASE \"{database_name}\";"))
+                .execute(pool)
+                .await
+            {
+                Ok(_result) => {
+                    recorder
+                        .publish(Event {
+                            type_: EventType::Normal,
+                            reason: "Created".into(),
+                            note: Some(format!("Successfully created `{}`", self.name_any())),
+                            action: "CreateDatabase".into(),
+                            secondary: None,
+                        })
+                        .await
+                        .map_err(Error::KubeError)?;
+                    true
+                }
+                Err(err) => {
+                    // TODO: Find a less hacky solution.
+                    if err.to_string().contains("already exists") {
+                        info!("The database already existed");
+                        recorder
+                            .publish(Event {
+                                type_: EventType::Warning,
+                                reason: "NothingToCreate".into(),
+                                note: Some(format!("Database `{}` was already created", self.name_any())),
+                                action: "CreateDatabase".into(),
+                                secondary: None,
+                            })
+                            .await
+                            .map_err(Error::KubeError)?;
+
+                        true
+                    } else {
+                        recorder
+                            .publish(Event {
+                                type_: EventType::Warning,
+                                reason: "CreationFailed".into(),
+                                note: Some(format!(
+                                    "Unable to create database `{}`: {}",
+                                    self.name_any(),
+                                    err
+                                )),
+                                action: "CreateDatabase".into(),
+                                secondary: None,
+                            })
+                            .await
+                            .map_err(Error::KubeError)?;
+                        false
+                    }
+                }
+            }
+        } else {
+            false
+        };
 
         // always overwrite status object with what we saw
         let new_status = Patch::Apply(json!({
             "apiVersion": "db-operator.widemeadows.de/v1",
             "kind": "Database",
             "status": DatabaseStatus {
-                created: true  // TODO: only if it exists ...
+                processed: true,
+                created
             }
         }));
         let ps = PatchParams::apply("cntrlr").force();
@@ -153,9 +285,27 @@ impl Database {
 
             // Run deletion
             let servers = ctx.servers.read().await;
-            if let Some(pool) = servers.get(&self.name_any()) {
+            if let Some(pool) = servers.get(&self.spec.server_ref.name) {
                 info!("Attempting to delete database {}", self.spec.name);
-                match sqlx::query::<Postgres>("DROP DATABASE $1;")
+                let database_name = match sanitize_db_name(&self.spec.name) {
+                    Ok(name) => name,
+                    Err(err) => {
+                        recorder
+                            .publish(Event {
+                                type_: EventType::Warning,
+                                reason: "InvalidName".into(),
+                                note: Some(format!("Database name invalid: {err}")),
+                                action: "DeleteDatabase".into(),
+                                secondary: None,
+                            })
+                            .await
+                            .map_err(Error::KubeError)?;
+
+                        return Ok(Action::requeue(Duration::from_secs(5 * 60)));
+                    }
+                };
+
+                match sqlx::query::<Postgres>(&format!("DROP DATABASE \"{database_name}\";"))
                     .bind(&self.spec.name)
                     .execute(pool)
                     .await
@@ -247,4 +397,25 @@ impl Database {
 
         Ok(Action::await_change())
     }
+}
+
+fn sanitize_db_name(name: &str) -> Result<String, String> {
+    // Regex to match valid database names (alphanumeric and underscores)
+    let re = Regex::new(r"^[a-zA-Z0-9_]+$").expect("Invalid regex");
+
+    // Check if the name is valid
+    if !re.is_match(name) {
+        return Err(
+            "Invalid database name: Only alphanumeric characters and underscores are allowed.".into(),
+        );
+    }
+
+    // Check length constraint (assuming PostgreSQL's limit of 63 characters)
+    if name.len() > 63 {
+        return Err("Invalid database name: Name must be 63 characters or fewer.".into());
+    }
+
+    // Add additional checks for reserved words if necessary
+
+    Ok(name.to_string())
 }

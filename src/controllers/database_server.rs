@@ -34,7 +34,7 @@ pub static DATABASE_SERVER_FINALIZER: &str = "databaseservers.db-operator.wideme
     plural = "databaseservers",
     namespaced
 )]
-#[kube(status = "DatabaseServerStatus", shortname = "dbs")]
+#[kube(status = "DatabaseServerStatus", shortname = "dbservers")]
 pub struct DatabaseServerSpec {
     pub connection: crate::connection::Connection,
     pub enable: bool,
@@ -140,6 +140,7 @@ impl DatabaseServer {
 
                         {
                             let mut servers = ctx.servers.write().await;
+                            info!("Registering database server {}", name);
                             servers.insert(name.clone(), pool);
                         }
 
@@ -149,7 +150,8 @@ impl DatabaseServer {
                                     type_: EventType::Normal,
                                     reason: "Connected".into(),
                                     note: Some(format!(
-                                        "Successfully connected to host `{}`: {}",
+                                        "Successfully connected {} to host `{}`: {}",
+                                        name,
                                         host,
                                         server_version.to_owned().unwrap_or(String::from("unknown"))
                                     )),
@@ -226,6 +228,7 @@ impl DatabaseServer {
         // Remove the connection pool.
         {
             let mut servers = ctx.servers.write().await;
+            info!("Deregistering database server {}", self.name_any());
             servers.remove(&self.name_any());
         }
 

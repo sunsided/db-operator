@@ -16,7 +16,7 @@ pub mod fixtures;
 mod secrets;
 
 use crate::controllers::database::Database;
-use crate::controllers::database_server;
+use crate::controllers::{database, database_server};
 use chrono::{DateTime, Utc};
 pub use controllers::database_server::DatabaseServer;
 use futures::StreamExt;
@@ -70,7 +70,9 @@ impl State {
     pub fn to_context(&self, client: Client) -> Arc<Context> {
         Arc::new(Context {
             client,
-            metrics: Metrics::default().register(&self.registry).unwrap(),
+            metrics: Metrics::default()
+                .register(&self.registry)
+                .expect("Metrics were already registered"),
             diagnostics: self.diagnostics.clone(),
             servers: Arc::new(RwLock::new(HashMap::new())),
         })
@@ -80,22 +82,40 @@ impl State {
 /// Initialize the controller and shared state (given the crd is installed)
 pub async fn run(state: State) {
     let client = Client::try_default().await.expect("failed to create kube Client");
-    let docs = Api::<DatabaseServer>::all(client.clone());
-    if let Err(e) = docs.list(&ListParams::default().limit(1)).await {
-        error!("CRD is not queryable; {e:?}. Is the CRD installed?");
+    let servers = Api::<DatabaseServer>::all(client.clone());
+    let databases = Api::<Database>::all(client.clone());
+
+    if let Err(e) = servers.list(&ListParams::default().limit(1)).await {
+        error!("DatabaseServer CRD is not queryable; {e:?}. Is the CRD installed?");
         info!("Installation: cargo run --bin crdgen | kubectl apply -f -");
         std::process::exit(1);
     }
-    Controller::new(docs, Config::default().any_semantic())
+
+    if let Err(e) = databases.list(&ListParams::default().limit(1)).await {
+        error!("Database CRD is not queryable; {e:?}. Is the CRD installed?");
+        info!("Installation: cargo run --bin crdgen | kubectl apply -f -");
+        std::process::exit(1);
+    }
+
+    let context = state.to_context(client);
+
+    let future1 = Controller::new(servers, Config::default().any_semantic())
         .shutdown_on_signal()
         .run(
             database_server::reconcile,
             database_server::error_policy,
-            state.to_context(client),
+            context.clone(),
         )
         .filter_map(|x| async move { Result::ok(x) })
-        .for_each(|_| futures::future::ready(()))
-        .await;
+        .for_each(|_| futures::future::ready(()));
+
+    let future2 = Controller::new(databases, Config::default().any_semantic())
+        .shutdown_on_signal()
+        .run(database::reconcile, database::error_policy, context)
+        .filter_map(|x| async move { Result::ok(x) })
+        .for_each(|_| futures::future::ready(()));
+
+    tokio::join!(future1, future2);
 }
 
 /// Diagnostics to be exposed by the web server
