@@ -20,9 +20,9 @@ pub use metrics::Metrics;
 mod connection;
 #[cfg(test)]
 pub mod fixtures;
-mod secrets;
 
 use crate::controllers::database::Database;
+use crate::controllers::database_event_recorder::DatabaseEventRecorder;
 use crate::controllers::{database, database_server};
 use chrono::{DateTime, Utc};
 pub use controllers::database_server::DatabaseServer;
@@ -148,23 +148,23 @@ impl Diagnostics {
         Recorder::new(client, self.reporter.clone(), doc.object_ref(&()))
     }
 
-    pub fn recorder_db(&self, client: Client, doc: &Database) -> Recorder {
-        Recorder::new(client, self.reporter.clone(), doc.object_ref(&()))
+    pub fn recorder_db(&self, client: Client, doc: &Database) -> DatabaseEventRecorder {
+        Recorder::new(client, self.reporter.clone(), doc.object_ref(&())).into()
     }
 }
 
 #[derive(Error, Debug)]
 pub enum Error {
     #[error("SerializationError: {0}")]
-    SerializationError(#[source] serde_json::Error),
+    SerializationError(#[from] serde_json::Error),
 
-    #[error("Kube Error: {0}")]
-    KubeError(#[source] kube::Error),
+    #[error("Kubernetes API Error: {0}")]
+    KubeError(#[from] kube::Error),
 
     #[error("Finalizer Error: {0}")]
     // NB: awkward type because finalizer::Error embeds the reconciler error (which is this)
     // so boxing this error to break cycles
-    FinalizerError(#[source] Box<kube::runtime::finalizer::Error<Error>>),
+    FinalizerError(#[from] Box<kube::runtime::finalizer::Error<Error>>),
 
     #[error("IllegalDocument")]
     IllegalDatabaseServer,

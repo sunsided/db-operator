@@ -76,12 +76,16 @@ pub enum TablePrivilege {
     References,
     #[serde(rename = "TRIGGER")]
     Trigger,
-    #[serde(rename = "ALL PRVILEGES")]
+    #[serde(rename = "ALL PRIVILEGES")]
     AllPrivileges,
 }
 
-impl DatabasePrivilege {
-    pub fn to_sql(&self) -> &str {
+pub trait ToSql {
+    fn to_sql(&self) -> &str;
+}
+
+impl ToSql for DatabasePrivilege {
+    fn to_sql(&self) -> &str {
         match self {
             DatabasePrivilege::Connect => "CONNECT",
             DatabasePrivilege::Create => "CREATE",
@@ -91,8 +95,8 @@ impl DatabasePrivilege {
     }
 }
 
-impl SchemaPrivilege {
-    pub fn to_sql(&self) -> &str {
+impl ToSql for SchemaPrivilege {
+    fn to_sql(&self) -> &str {
         match self {
             SchemaPrivilege::Usage => "USAGE",
             SchemaPrivilege::Create => "CREATE",
@@ -101,8 +105,8 @@ impl SchemaPrivilege {
     }
 }
 
-impl TablePrivilege {
-    pub fn to_sql(&self) -> &str {
+impl ToSql for TablePrivilege {
+    fn to_sql(&self) -> &str {
         match self {
             TablePrivilege::Select => "SELECT",
             TablePrivilege::Insert => "INSERT",

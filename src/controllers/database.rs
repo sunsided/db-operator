@@ -1,12 +1,11 @@
-use crate::controllers::grants::Grants;
+use crate::controllers::database_event_recorder::{DatabaseEventRecorder, EventAction, EventReason};
+use crate::controllers::grants::{Grants, ToSql};
 use crate::{Context, Error};
 use chrono::Utc;
-use kube::runtime::events::Recorder;
 use kube::{
     api::{Api, Patch, PatchParams, ResourceExt},
     runtime::{
         controller::Action,
-        events::{Event, EventType},
         finalizer::{finalizer, Event as Finalizer},
     },
     CustomResource,
@@ -42,6 +41,8 @@ pub struct DatabaseServerSpec {
     pub server_ref: DatabaseServerRef,
     /// The name of the database to create.
     pub name: String,
+    /// The optional database comment.
+    pub comment: Option<String>,
     /// Whether to create the database when reconciling the resource.
     pub create: Option<bool>,
     /// Whether to delete the database when removing the resource.
@@ -71,24 +72,24 @@ impl Database {
     }
 }
 
-#[instrument(skip(ctx, doc), fields(trace_id))]
-pub async fn reconcile(doc: Arc<Database>, ctx: Arc<Context>) -> crate::Result<Action> {
+#[instrument(skip(ctx, database), fields(trace_id))]
+pub async fn reconcile(database: Arc<Database>, ctx: Arc<Context>) -> crate::Result<Action> {
     let trace_id = crate::telemetry::get_trace_id();
     Span::current().record("trace_id", field::display(&trace_id));
     let _timer = ctx.metrics.count_and_measure();
     ctx.diagnostics.write().await.last_event = Utc::now();
-    let ns = doc.namespace().unwrap(); // doc is namespace scoped
+    let ns = database.namespace().unwrap(); // doc is namespace scoped
     let dbs: Api<Database> = Api::namespaced(ctx.client.clone(), &ns);
 
-    info!("Reconciling Database \"{}\" in {}", doc.name_any(), ns);
-    finalizer(&dbs, DATABASE_FINALIZER, doc, |event| async {
+    info!("Reconciling Database \"{}\" in {}", database.name_any(), ns);
+    finalizer(&dbs, DATABASE_FINALIZER, database, |event| async {
         match event {
-            Finalizer::Apply(doc) => doc.reconcile(ctx.clone()).await,
-            Finalizer::Cleanup(doc) => doc.cleanup(ctx.clone()).await,
+            Finalizer::Apply(db) => db.reconcile(ctx.clone()).await,
+            Finalizer::Cleanup(db) => db.cleanup(ctx.clone()).await,
         }
     })
-    .await
-    .map_err(|e| Error::FinalizerError(Box::new(e)))
+        .await
+        .map_err(|e| Error::FinalizerError(Box::new(e)))
 }
 
 pub fn error_policy(doc: Arc<Database>, error: &Error, ctx: Arc<Context>) -> Action {
@@ -111,19 +112,11 @@ impl Database {
         let pool = match servers.get(server_id) {
             None => {
                 warn!("Unable to look up database server {}", server_id);
-                recorder
-                    .publish(Event {
-                        type_: EventType::Warning,
-                        reason: "MissingServer".into(),
-                        note: Some(format!(
-                            "Unable to create database due to invalid server reference: {}",
-                            self.spec.server_ref.name
-                        )),
-                        action: "CreateDatabase".into(),
-                        secondary: None,
-                    })
-                    .await
-                    .map_err(Error::KubeError)?;
+                recorder.warn(EventAction::CreateDatabase, EventReason::MissingServer, format!(
+                    "Unable to create database for {name} due to unresolved server reference: {}",
+                    self.spec.server_ref.name
+                ))
+                    .await?;
 
                 return Ok(Action::requeue(Duration::from_secs(5 * 60)));
             }
@@ -139,17 +132,10 @@ impl Database {
                 Ok(Some(_value)) => true,
                 Ok(None) => false,
                 Err(err) => {
-                    recorder
-                        .publish(Event {
-                            type_: EventType::Warning,
-                            reason: "InspectionFailed".into(),
-                            note: Some(format!("Failed to test for databases: {err}")),
-                            action: "CreateDatabase".into(),
-                            secondary: None,
-                        })
-                        .await
-                        .map_err(Error::KubeError)?;
-
+                    recorder.warn(EventAction::CreateDatabase, EventReason::InspectionFailed, format!(
+                        "Unable to inspect databases for {name}: {err}"
+                    ))
+                        .await?;
                     return Ok(Action::requeue(Duration::from_secs(5 * 60)));
                 }
             };
@@ -157,16 +143,9 @@ impl Database {
         let database_name = match sanitize_db_name(&self.spec.name) {
             Ok(name) => name,
             Err(err) => {
-                recorder
-                    .publish(Event {
-                        type_: EventType::Warning,
-                        reason: "InvalidName".into(),
-                        note: Some(format!("Database name invalid: {err}")),
-                        action: "ReconcileDatabase".into(),
-                        secondary: None,
-                    })
-                    .await
-                    .map_err(Error::KubeError)?;
+                recorder.warn(EventAction::CreateDatabase, EventReason::InvalidName, format!(
+                    "Invalid database name for {name}: {err}"))
+                    .await?;
 
                 return Ok(Action::requeue(Duration::from_secs(5 * 60)));
             }
@@ -179,20 +158,35 @@ impl Database {
             } else {
                 let should_create = self.spec.create.unwrap_or(true);
                 if !self.was_created() && should_create {
-                    // send an event once per hide
-                    recorder
-                        .publish(Event {
-                            type_: EventType::Normal,
-                            reason: "CreateRequested".into(),
-                            note: Some(String::from("Creating database")),
-                            action: "CreateDatabase".into(),
-                            secondary: None,
-                        })
-                        .await
-                        .map_err(Error::KubeError)?;
-
                     info!("Attempting to create database {}", self.spec.name);
                     created = self.create_database(&recorder, pool, &database_name).await?;
+                }
+            }
+        }
+
+        // Update the database comment.
+        if let Some(comment) = &self.spec.comment {
+            if comment.contains("--") || comment.contains("/*") || comment.contains("*/") || comment.chars().any(|c| !c.is_ascii() || c.is_ascii_control()) {
+                warn!("Comment contains illegal characters for {name}");
+                recorder.warn(EventAction::ApplyComment, EventReason::Ignored, format!(
+                    "Comment for database {name} contains illegal characters - skipping"))
+                    .await?;
+            } else {
+                let sanitized = comment.replace("'", "''").replace(r#"\"#, r#"\\"#);
+                match sqlx::query::<Postgres>(&format!("COMMENT ON DATABASE \"{database_name}\" IS '{sanitized}';"))
+                    .bind(comment)
+                    .execute(pool)
+                    .await
+                {
+                    Ok(_result) => {
+                        debug!("Set comment on database {name}");
+                    }
+                    Err(err) => {
+                        warn!("Failed to set comment on database {database_name}: {err}");
+                        recorder.warn(EventAction::ApplyComment, EventReason::Failed, format!(
+                            "Failed to apply comment to database {name}: {err}"))
+                            .await?;
+                    }
                 }
             }
         }
@@ -202,16 +196,9 @@ impl Database {
             let user_name = match sanitize_user_name(&user_grant.user) {
                 Ok(name) => name,
                 Err(err) => {
-                    recorder
-                        .publish(Event {
-                            type_: EventType::Warning,
-                            reason: "InvalidName".into(),
-                            note: Some(format!("User name invalid: {err}")),
-                            action: "ReconcileDatabase".into(),
-                            secondary: None,
-                        })
-                        .await
-                        .map_err(Error::KubeError)?;
+                    recorder.warn(EventAction::ApplyGrant, EventReason::InvalidName, format!(
+                        "Invalid user name for {name}: {err}"))
+                        .await?;
 
                     return Ok(Action::requeue(Duration::from_secs(5 * 60)));
                 }
@@ -223,40 +210,24 @@ impl Database {
                     match sqlx::query::<Postgres>(&format!(
                         "GRANT {privilege} ON DATABASE \"{database_name}\" TO \"{user_name}\";"
                     ))
-                    .execute(pool)
-                    .await
+                        .execute(pool)
+                        .await
                     {
                         Ok(_result) => {
                             debug!(
                                 "Set privilege {privilege} on {database_name} to {}",
                                 user_grant.user
                             );
-                            recorder
-                                .publish(Event {
-                                    type_: EventType::Normal,
-                                    reason: "Success".into(),
-                                    note: Some(format!(
-                                        "Applied privilege {privilege} on database {database_name} to {}",
-                                        user_grant.user
-                                    )),
-                                    action: "ApplyGrant".into(),
-                                    secondary: None,
-                                })
-                                .await
-                                .map_err(Error::KubeError)?;
+                            recorder.info(EventAction::ApplyGrant, EventReason::Success, format!(
+                                "Applied privilege {privilege} on database {database_name} to {}",
+                                user_grant.user
+                            ))
+                                .await?;
                         }
                         Err(err) => {
-                            warn!("Failed to set comment on database {database_name}: {err}");
-                            recorder
-                                .publish(Event {
-                                    type_: EventType::Warning,
-                                    reason: "GrantFailed".into(),
-                                    note: Some(format!("Failed to apply privilege {privilege} on database {database_name} to {}: {err}", user_grant.user)),
-                                    action: "ApplyGrant".into(),
-                                    secondary: None,
-                                })
-                                .await
-                                .map_err(Error::KubeError)?;
+                            warn!("Failed to apply grant on database {database_name}: {err}");
+                            recorder.warn(EventAction::ApplyGrant, EventReason::Failed, format!("Failed to apply privilege {privilege} on database {database_name} to {}: {err}", user_grant.user))
+                                .await?;
                         }
                     }
                 }
@@ -309,7 +280,7 @@ impl Database {
 
     async fn create_database(
         &self,
-        recorder: &Recorder,
+        recorder: &DatabaseEventRecorder,
         pool: &Pool<Postgres>,
         database_name: &String,
     ) -> Result<bool, Error> {
@@ -319,49 +290,20 @@ impl Database {
                 .await
             {
                 Ok(_result) => {
-                    recorder
-                        .publish(Event {
-                            type_: EventType::Normal,
-                            reason: "Created".into(),
-                            note: Some(format!("Successfully created `{}`", self.name_any())),
-                            action: "CreateDatabase".into(),
-                            secondary: None,
-                        })
-                        .await
-                        .map_err(Error::KubeError)?;
+                    recorder.info(EventAction::CreateDatabase, EventReason::Success, format!("Successfully created database for {}", self.name_any()))
+                        .await?;
                     true
                 }
                 Err(err) => {
                     // TODO: Find a less hacky solution.
                     if err.to_string().contains("already exists") {
-                        info!("The database already existed");
-                        recorder
-                            .publish(Event {
-                                type_: EventType::Warning,
-                                reason: "NothingToCreate".into(),
-                                note: Some(format!("Database `{}` was already created", self.name_any())),
-                                action: "CreateDatabase".into(),
-                                secondary: None,
-                            })
-                            .await
-                            .map_err(Error::KubeError)?;
-
+                        info!("Database already existed for {}", self.name_any());
+                        recorder.info(EventAction::CreateDatabase, EventReason::Success, format!("Database for {} already existed", self.name_any()))
+                            .await?;
                         true
                     } else {
-                        recorder
-                            .publish(Event {
-                                type_: EventType::Warning,
-                                reason: "CreationFailed".into(),
-                                note: Some(format!(
-                                    "Unable to create database `{}`: {}",
-                                    self.name_any(),
-                                    err
-                                )),
-                                action: "CreateDatabase".into(),
-                                secondary: None,
-                            })
-                            .await
-                            .map_err(Error::KubeError)?;
+                        recorder.warn(EventAction::CreateDatabase, EventReason::Failed, format!("Unable to create database for {}: {err}", self.name_any()))
+                            .await?;
                         false
                     }
                 }
@@ -372,130 +314,54 @@ impl Database {
     // Finalizer cleanup (the object was deleted, ensure nothing is orphaned)
     async fn cleanup(&self, ctx: Arc<Context>) -> crate::Result<Action> {
         let recorder = ctx.diagnostics.read().await.recorder_db(ctx.client.clone(), self);
+        let name = self.name_any();
 
         // Delete the database only when requested
-        if self.spec.delete {
-            recorder
-                .publish(Event {
-                    type_: EventType::Normal,
-                    reason: "DeleteRequested".into(),
-                    note: Some(format!("Deleting `{}` due to configuration", self.name_any())),
-                    action: "DeleteDatabase".into(),
-                    secondary: None,
-                })
+        if !self.spec.delete {
+            recorder.info(EventAction::DeleteDatabase, EventReason::Ignored, format!("Skipping deletion of database for {name} due to configuration"))
+                .await?;
+            return Ok(Action::await_change());
+        }
+
+        // Run deletion
+        let servers = ctx.servers.read().await;
+        if let Some(pool) = servers.get(&self.spec.server_ref.name) {
+            info!("Attempting to delete database {}", self.spec.name);
+            let database_name = match sanitize_db_name(&self.spec.name) {
+                Ok(name) => name,
+                Err(err) => {
+                    recorder.info(EventAction::DeleteDatabase, EventReason::InvalidName,
+                                  format!("Invalid database name for {name}: {err}"))
+                        .await?;
+                    return Ok(Action::requeue(Duration::from_secs(5 * 60)));
+                }
+            };
+
+            match sqlx::query::<Postgres>(&format!("DROP DATABASE \"{database_name}\";"))
+                .bind(&self.spec.name)
+                .execute(pool)
                 .await
-                .map_err(Error::KubeError)?;
-
-            // Run deletion
-            let servers = ctx.servers.read().await;
-            if let Some(pool) = servers.get(&self.spec.server_ref.name) {
-                info!("Attempting to delete database {}", self.spec.name);
-                let database_name = match sanitize_db_name(&self.spec.name) {
-                    Ok(name) => name,
-                    Err(err) => {
-                        recorder
-                            .publish(Event {
-                                type_: EventType::Warning,
-                                reason: "InvalidName".into(),
-                                note: Some(format!("Database name invalid: {err}")),
-                                action: "DeleteDatabase".into(),
-                                secondary: None,
-                            })
-                            .await
-                            .map_err(Error::KubeError)?;
-
-                        return Ok(Action::requeue(Duration::from_secs(5 * 60)));
-                    }
-                };
-
-                match sqlx::query::<Postgres>(&format!("DROP DATABASE \"{database_name}\";"))
-                    .bind(&self.spec.name)
-                    .execute(pool)
-                    .await
-                {
-                    Ok(result) => {
-                        if result.rows_affected() > 0 {
-                            recorder
-                                .publish(Event {
-                                    type_: EventType::Normal,
-                                    reason: "Deleted".into(),
-                                    note: Some(format!("Successfully deleted `{}`", self.name_any())),
-                                    action: "DeleteDatabase".into(),
-                                    secondary: None,
-                                })
-                                .await
-                                .map_err(Error::KubeError)?;
-                        } else {
-                            recorder
-                                .publish(Event {
-                                    type_: EventType::Warning,
-                                    reason: "NothingToDelete".into(),
-                                    note: Some(format!("Database `{}` was already removed", self.name_any())),
-                                    action: "DeleteDatabase".into(),
-                                    secondary: None,
-                                })
-                                .await
-                                .map_err(Error::KubeError)?;
-                        }
-                    }
-                    Err(err) => {
-                        recorder
-                            .publish(Event {
-                                type_: EventType::Warning,
-                                reason: "DeletionFailed".into(),
-                                note: Some(format!(
-                                    "Unable to delete database `{}`: {}",
-                                    self.name_any(),
-                                    err
-                                )),
-                                action: "DeleteDatabase".into(),
-                                secondary: None,
-                            })
-                            .await
-                            .map_err(Error::KubeError)?;
-                        return Err(Error::IllegalDatabaseServer);
-                    }
-                };
-
-                recorder
-                    .publish(Event {
-                        type_: EventType::Normal,
-                        reason: "Deleted".into(),
-                        note: Some(format!("Successfully deleted `{}`", self.name_any())),
-                        action: "DeleteDatabase".into(),
-                        secondary: None,
-                    })
-                    .await
-                    .map_err(Error::KubeError)?;
-            } else {
-                recorder
-                    .publish(Event {
-                        type_: EventType::Warning,
-                        reason: "DeletionFailed".into(),
-                        note: Some(format!(
-                            "Unable to delete database `{}` because the connection to the server was lost",
-                            self.name_any()
-                        )),
-                        action: "DeleteDatabase".into(),
-                        secondary: None,
-                    })
-                    .await
-                    .map_err(Error::KubeError)?;
-            }
+            {
+                Ok(_result) => {
+                    recorder.info(EventAction::DeleteDatabase, EventReason::Success,
+                                  format!("Successfully deleted database for {name}"))
+                        .await?;
+                }
+                Err(err) => {
+                    recorder.info(EventAction::DeleteDatabase, EventReason::Failed,
+                                  format!("Failed to deleted database for {name}: {err}"))
+                        .await?;
+                    return Ok(Action::requeue(Duration::from_secs(5 * 60)));
+                }
+            };
         } else {
-            recorder
-                .publish(Event {
-                    type_: EventType::Normal,
-                    reason: "Ignored".into(),
-                    note: Some(format!(
-                        "Skipping deletion of `{}` due to configuration",
-                        self.name_any()
-                    )),
-                    action: "DeleteDatabase".into(),
-                    secondary: None,
-                })
-                .await
-                .map_err(Error::KubeError)?;
+            recorder.info(EventAction::DeleteDatabase, EventReason::MissingServer,
+                          format!(
+                              "Unable to create database for {name} due to unresolved server reference: {}",
+                              self.spec.server_ref.name
+                          ))
+                .await?;
+            return Ok(Action::requeue(Duration::from_secs(5 * 60)));
         }
 
         Ok(Action::await_change())

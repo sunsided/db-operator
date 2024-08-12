@@ -1,4 +1,4 @@
-use crate::secrets::{SecretError, SecretRef};
+use crate::controllers::secrets::{SecretError, SecretRef};
 use k8s_openapi::api::core::v1::Secret;
 use kube::Api;
 use schemars::JsonSchema;

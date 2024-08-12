@@ -7,6 +7,7 @@ spec:
   serverRef:
     name: postgres-test
   name: test
+  comment: "A test database"
   create: true
   delete: true
   grants:
@@ -18,3 +19,56 @@ spec:
         name: public
         grants:
           - ALL PRIVILEGES
+---
+apiVersion: db-operator.widemeadows.de/v1
+kind: Database
+metadata:
+  name: foo
+spec:
+  serverRef:
+    name: postgres-test
+  name: foo
+  comment: "Another test database"
+  create: true
+  delete: true
+  grants:
+    - user: test
+      database:
+        grants:
+          - ALL PRIVILEGES
+      schema:
+        name: public
+        grants:
+          - ALL PRIVILEGES
+---
+apiVersion: db-operator.widemeadows.de/v1
+kind: Database
+metadata:
+  name: bar
+spec:
+  serverRef:
+    name: postgres-test
+  name: bar
+  comment: "Yet another test database"
+  create: true
+  delete: true
+  grants:
+    - user: test
+      database:
+        grants:
+          - ALL PRIVILEGES
+      schema:
+        name: public
+        grants:
+          - ALL PRIVILEGES
+---
+apiVersion: db-operator.widemeadows.de/v1
+kind: Database
+metadata:
+  name: postgres
+spec:
+  serverRef:
+    name: postgres-test
+  name: postgres
+  create: false
+  delete: false

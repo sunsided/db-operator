@@ -282,6 +282,10 @@ spec:
 
               This provides a hook for generating the CRD yaml (in crdgen.rs)
             properties:
+              comment:
+                description: The optional database comment.
+                nullable: true
+                type: string
               create:
                 description: Whether to create the database when reconciling the resource.
                 nullable: true
@@ -349,7 +353,7 @@ spec:
                             - TRUNCATE
                             - REFERENCES
                             - TRIGGER
-                            - ALL PRVILEGES
+                            - ALL PRIVILEGES
                             type: string
                           type: array
                         name:
