@@ -8,6 +8,7 @@ spec:
     name: postgres-test
   name: test
   comment: "A test database"
+  readOnly: false
   create: true
   delete: true
   grants:
@@ -29,6 +30,7 @@ spec:
     name: postgres-test
   name: foo
   comment: "Another test database"
+  readOnly: false
   create: true
   delete: true
   grants:
@@ -45,11 +47,13 @@ apiVersion: db-operator.widemeadows.de/v1
 kind: Database
 metadata:
   name: bar
+  namespace: postgres
 spec:
   serverRef:
     name: postgres-test
   name: bar
   comment: "Yet another test database"
+  readOnly: false
   create: true
   delete: true
   grants:
@@ -66,9 +70,11 @@ apiVersion: db-operator.widemeadows.de/v1
 kind: Database
 metadata:
   name: postgres
+  namespace: postgres
 spec:
   serverRef:
     name: postgres-test
   name: postgres
+  readOnly: true
   create: false
   delete: false

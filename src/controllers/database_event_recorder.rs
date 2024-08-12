@@ -4,9 +4,9 @@ use kube::runtime::events::{Event, EventType, Recorder};
 
 pub struct DatabaseEventRecorder(Recorder);
 
-impl Into<DatabaseEventRecorder> for Recorder {
-    fn into(self) -> DatabaseEventRecorder {
-        DatabaseEventRecorder(self)
+impl From<Recorder> for DatabaseEventRecorder {
+    fn from(value: Recorder) -> Self {
+        Self(value)
     }
 }
 
@@ -25,11 +25,18 @@ impl DatabaseEventRecorder {
         self.publish(EventType::Warning, action, reason, note).await
     }
 
-    pub async fn publish<N>(&self, type_: EventType, action: EventAction, reason: EventReason, note: N) -> Result<(), Error>
+    pub async fn publish<N>(
+        &self,
+        type_: EventType,
+        action: EventAction,
+        reason: EventReason,
+        note: N,
+    ) -> Result<(), Error>
     where
         N: Into<String>,
     {
-        Ok(self.0
+        Ok(self
+            .0
             .publish(Event {
                 type_,
                 action: action.to_string(),

@@ -19,7 +19,7 @@ pub struct DatabaseGrant {
     pub grants: Vec<DatabasePrivilege>,
 }
 
-/// A set of table-specific grantes.
+/// A set of table-specific grants.
 #[derive(Deserialize, Serialize, Clone, Default, Debug, JsonSchema)]
 pub struct SchemaGrant {
     pub name: String,

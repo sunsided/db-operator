@@ -5,7 +5,7 @@ metadata:
   name: my-test-database-secret
 type: Opaque
 data:
-  connectionString: cG9zdGdyZXM6Ly9teXVzZXI6bXlwYXNzd29yZEBwb3N0Z3Jlcy9wb3N0Z3Jlcw==
+  connectionString: cG9zdGdyZXM6Ly9teXVzZXI6bXlwYXNzd29yZEBwb3N0Z3Jlcy5wb3N0Z3Jlcy9wb3N0Z3Jlcw==
 ---
 apiVersion: db-operator.widemeadows.de/v1
 kind: DatabaseServer

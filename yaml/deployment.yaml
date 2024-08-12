@@ -287,10 +287,11 @@ spec:
                 nullable: true
                 type: string
               create:
+                default: false
                 description: Whether to create the database when reconciling the resource.
-                nullable: true
                 type: boolean
               delete:
+                default: false
                 description: Whether to delete the database when removing the resource.
                 type: boolean
               grants:
@@ -320,7 +321,7 @@ spec:
                       nullable: true
                       type: string
                     schema:
-                      description: A set of table-specific grantes.
+                      description: A set of table-specific grants.
                       nullable: true
                       properties:
                         grants:
@@ -376,31 +377,35 @@ spec:
               name:
                 description: The name of the database to create.
                 type: string
+              readOnly:
+                description: Disable all write operations.
+                type: boolean
               serverRef:
                 description: A reference to the `DatabaseServer` instance to use.
                 properties:
                   name:
-                    description: A reference to the `DatabaseServer` instance.
+                    description: The name of the server.
+                    type: string
+                  namespace:
+                    description: The optional namespace of the server.
+                    nullable: true
                     type: string
                 required:
                 - name
                 type: object
             required:
-            - delete
             - name
+            - readOnly
             - serverRef
             type: object
           status:
             description: The status object of `Database`
             nullable: true
             properties:
-              created:
-                type: boolean
-              processed:
+              exists:
                 type: boolean
             required:
-            - created
-            - processed
+            - exists
             type: object
         required:
         - spec

@@ -29,10 +29,8 @@ securityContext:
 tracing:
   # Use the telemetry built image and inject OPENTELEMETRY_ENDPOINT_URL
   enabled: false
-  # namespace of the collector
-  namespace: monitoring
   # collector service name
-  service: promstack-tempo
+  service: localhost
   # collector port for OTLP gRPC
   port: 4317
 

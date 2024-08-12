@@ -1,14 +1,15 @@
 use crate::{Context, Error};
 use chrono::Utc;
 use k8s_openapi::api::core::v1::Secret;
+use kube::runtime::reflector::Lookup;
 use kube::{
-    api::{Api, Patch, PatchParams, ResourceExt},
+    api::{Api, Patch, PatchParams},
     runtime::{
         controller::Action,
         events::{Event, EventType},
         finalizer::{finalizer, Event as Finalizer},
     },
-    CustomResource,
+    CustomResource, ResourceExt,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -66,10 +67,10 @@ pub async fn reconcile(doc: Arc<DatabaseServer>, ctx: Arc<Context>) -> crate::Re
     Span::current().record("trace_id", field::display(&trace_id));
     let _timer = ctx.metrics.count_and_measure();
     ctx.diagnostics.write().await.last_event = Utc::now();
-    let ns = doc.namespace().unwrap(); // doc is namespace scoped
+    let ns = Lookup::namespace(doc.as_ref()).unwrap(); // doc is namespace scoped
     let servers: Api<DatabaseServer> = Api::namespaced(ctx.client.clone(), &ns);
 
-    info!("Reconciling DatabaseServer \"{}\" in {}", doc.name_any(), ns);
+    info!("Reconciling DatabaseServer \"{}\" in {}", doc.name().unwrap(), ns);
     finalizer(&servers, DATABASE_SERVER_FINALIZER, doc, |event| async {
         match event {
             Finalizer::Apply(doc) => doc.reconcile(ctx.clone()).await,
@@ -96,9 +97,9 @@ impl DatabaseServer {
     async fn reconcile(&self, ctx: Arc<Context>) -> crate::Result<Action> {
         let client = ctx.client.clone();
         let recorder = ctx.diagnostics.read().await.recorder(client.clone(), self);
-        let ns = self.namespace().unwrap();
+        let ns = Lookup::namespace(self).unwrap();
         let name = self.name_any();
-        let servers: Api<DatabaseServer> = Api::namespaced(client.clone(), &ns);
+        let servers: Api<DatabaseServer> = Api::namespaced(client.clone(), &ns); // TODO: Scan for all servers in all namespaces.
         let secrets: Api<Secret> = Api::namespaced(client, &ns);
 
         let should_enable = self.spec.enable;
@@ -144,7 +145,7 @@ impl DatabaseServer {
                             servers.insert(name.clone(), pool);
                         }
 
-                        if !self.was_connected() {
+                        if self.was_connected() {
                             recorder
                                 .publish(Event {
                                     type_: EventType::Normal,
@@ -161,6 +162,8 @@ impl DatabaseServer {
                                 .await
                                 .map_err(Error::KubeError)?;
                         }
+
+                        // TODO: Update all databases that refer to this server.
                         true
                     }
                     Err(err) => {
@@ -250,7 +253,7 @@ impl DatabaseServer {
 // Mock tests relying on fixtures.rs and its primitive apiserver mocks
 #[cfg(test)]
 mod test {
-    use super::{error_policy, reconcile, Context, DatabaseServer};
+    use super::{reconcile, Context, DatabaseServer};
     use crate::fixtures::{timeout_after_1s, DatabaseServerScenario};
     use std::sync::Arc;
 
